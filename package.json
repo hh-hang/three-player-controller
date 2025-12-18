@@ -1,0 +1,44 @@
+{
+  "name": "three-player-controller",
+  "version": "0.1.0",
+  "description": "Third-person / first-person player controller for three.js (three-mesh-bvh based)",
+  "author": "",
+  "license": "MIT",
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rimraf dist",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "three": "^0.182.0",
+    "three-mesh-bvh": "^0.9.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.1",
+    "typescript": "^5.4.0",
+    "@types/three": "^0.182.0",
+    "rimraf": "^6.0.0"
+  },
+  "keywords": [
+    "three",
+    "threejs",
+    "player",
+    "controller",
+    "third-person",
+    "bvh"
+  ]
+}
