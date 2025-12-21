@@ -16,19 +16,27 @@ class PlayerController {
   camera!: THREE.PerspectiveCamera;
   controls!: OrbitControls;
   initPos!: THREE.Vector3;
-  playerModelUrl: string;
-  droneModelUrl: string;
-  remoteControlUrl: string;
-  scale = 0.01;
+  playerModel: {
+    url: string;
+    idleAnim: string;
+    walkAnim: string;
+    runAnim: string;
+    jumpAnim: string;
+    leftWalkAnim?: string;
+    rightWalkAnim?: string;
+    backwardAnim?: string;
+    scale?: number;
+  };
   isFirstPerson: boolean = false;
 
-  visualizeDepth: number = 0 * this.scale;
-  gravity: number = -2400 * this.scale;
-  jumpHeight: number = 300 * this.scale;
-  highJumpHeight: number = 1000 * this.scale;
-  playerSpeed: number = 400 * this.scale;
   mouseSensity: number = 5;
   boundingBoxMinY: number = 0;
+
+  visualizeDepth: number;
+  gravity: number;
+  jumpHeight: number;
+  highJumpHeight: number;
+  playerSpeed: number;
 
   // 测试参数
   displayPlayer: boolean = false;
@@ -40,10 +48,6 @@ class PlayerController {
   visualizer: MeshBVHHelper | null = null;
   player!: THREE.Mesh & { capsuleInfo?: any };
   person: THREE.Object3D | null = null;
-  drone: THREE.Object3D | null = null;
-  droneController: THREE.Object3D | null = null;
-  tipCard: THREE.Mesh | null = null;
-  confirmCard: THREE.Mesh | null = null;
 
   //  状态开关
   playerIsOnGround: boolean = false;
@@ -90,16 +94,7 @@ class PlayerController {
   jumpAction!: THREE.AnimationAction;
   runAction!: THREE.AnimationAction;
   controlDroneAction!: THREE.AnimationAction;
-  prayingAction!: THREE.AnimationAction;
   actionState!: THREE.AnimationAction;
-
-  // 飞行相关属性
-  isFlying = false;
-  isFirstFlying = true; // 是否首次进入飞行模式
-  flightSpeed = 600 * this.scale; // 基础速度
-  flightBoostMultiplier = 2.5; // 冲刺倍数
-  flightVerticalSpeed = 300 * this.scale; // 上升/下降速度
-  flightDamping = 0.9; // 速度阻尼（平滑）
 
   //  复用向量：用于相机朝向 / 移动
   readonly camDir = new THREE.Vector3();
@@ -112,8 +107,6 @@ class PlayerController {
   readonly DIR_LFT = new THREE.Vector3(-1, 0, 0);
   readonly DIR_RGT = new THREE.Vector3(1, 0, 0);
 
-  readonly _worldMove = new THREE.Vector3();
-  readonly _camRight = new THREE.Vector3();
   readonly _personToCam = new THREE.Vector3();
 
   readonly _originTmp = new THREE.Vector3();
@@ -126,9 +119,8 @@ class PlayerController {
     new THREE.Vector3()
   );
 
-  // 优化默认射线检测
+  // 射线检测时只返回第一个碰撞
   constructor() {
-    // 射线检测时只返回第一个碰撞
     (this._raycaster as any).firstHitOnly = true;
     (this._raycasterPersonToCam as any).firstHitOnly = true;
   }
@@ -139,9 +131,17 @@ class PlayerController {
       scene: THREE.Scene;
       camera: THREE.PerspectiveCamera;
       controls: OrbitControls;
-      playerModelUrl: string;
-      remoteControlUrl: string;
-      droneModelUrl: string;
+      playerModel: {
+        url: string;
+        idleAnim: string;
+        walkAnim: string;
+        runAnim: string;
+        jumpAnim: string;
+        leftWalkAnim?: string;
+        rightWalkAnim?: string;
+        backwardAnim?: string;
+        scale?: number;
+      };
       initPos?: THREE.Vector3;
       scale?: number;
     },
@@ -150,12 +150,17 @@ class PlayerController {
     this.scene = opts.scene;
     this.camera = opts.camera;
     this.controls = opts.controls;
-    this.playerModelUrl = opts.playerModelUrl;
-    this.droneModelUrl = opts.droneModelUrl;
-    this.remoteControlUrl = opts.remoteControlUrl;
-
+    this.playerModel = opts.playerModel;
+    this.playerModel.scale = opts.playerModel.scale
+      ? opts.playerModel.scale
+      : 1;
     this.initPos = opts.initPos ? opts.initPos : new THREE.Vector3(0, 0, 0);
-    this.scale = opts.scale ? opts.scale : this.scale;
+
+    this.visualizeDepth = 0 * this.playerModel.scale;
+    this.gravity = -2400 * this.playerModel.scale;
+    this.jumpHeight = 300 * this.playerModel.scale;
+    this.highJumpHeight = 1000 * this.playerModel.scale;
+    this.playerSpeed = 400 * this.playerModel.scale;
 
     // 创建bvh
     await this.createBVH();
@@ -165,12 +170,6 @@ class PlayerController {
 
     // 加载玩家模型
     await this.loadPersonGLB();
-
-    // 加载无人机模型
-    await this.loadDroneGLB();
-
-    // 加载无人机控制器
-    await this.loadDroneControllerGLB();
 
     // 等待资源加载完毕再设置摄像机
     if (this.isFirstPerson && this.player) {
@@ -189,8 +188,8 @@ class PlayerController {
       this.player.attach(this.camera);
       this.camera.position.set(
         0,
-        this.isFlying ? -110 * this.scale : 40 * this.scale,
-        30 * this.scale
+        40 * this.playerModel.scale,
+        30 * this.playerModel.scale
       );
       this.camera.rotation.set(0, Math.PI, 0);
       document.body.requestPointerLock(); // 锁定鼠标
@@ -202,9 +201,9 @@ class PlayerController {
       );
       const angle = Math.atan2(dir.z, dir.x);
       const offset = new THREE.Vector3(
-        Math.cos(angle) * 400 * this.scale,
-        200 * this.scale,
-        Math.sin(angle) * 400 * this.scale
+        Math.cos(angle) * 400 * this.playerModel.scale,
+        200 * this.playerModel.scale,
+        Math.sin(angle) * 400 * this.playerModel.scale
       );
       this.camera.position.copy(worldPos).add(offset);
       this.controls.target.copy(worldPos);
@@ -215,7 +214,11 @@ class PlayerController {
   // 摄像机/控制器设置
   setCameraPos() {
     if (this.isFirstPerson) {
-      this.camera.position.set(0, 40 * this.scale, 30 * this.scale);
+      this.camera.position.set(
+        0,
+        40 * this.playerModel.scale,
+        30 * this.playerModel.scale
+      );
     } else {
       const worldPos = this.player.position.clone();
       const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
@@ -223,9 +226,9 @@ class PlayerController {
       );
       const angle = Math.atan2(dir.z, dir.x);
       const offset = new THREE.Vector3(
-        Math.cos(angle) * 400 * this.scale,
-        200 * this.scale,
-        Math.sin(angle) * 400 * this.scale
+        Math.cos(angle) * 400 * this.playerModel.scale,
+        200 * this.playerModel.scale,
+        Math.sin(angle) * 400 * this.playerModel.scale
       );
       this.camera.position.copy(worldPos).add(offset);
     }
@@ -266,7 +269,7 @@ class PlayerController {
   async loadPersonGLB() {
     try {
       const gltf: GLTF = await this.loader.loadAsync(
-        this.playerModelUrl,
+        this.playerModel.url,
         (xhr) => {
           // console.log('人物模型努力加载中... 请稍等', (xhr.loaded / xhr.total) * 100 + '% ');
         }
@@ -274,38 +277,52 @@ class PlayerController {
       this.person = gltf.scene;
       this.person.name = "角色";
       this.person.scale.set(
-        0.9 * this.scale,
-        0.9 * this.scale,
-        0.9 * this.scale
+        0.9 * this.playerModel.scale,
+        0.9 * this.playerModel.scale,
+        0.9 * this.playerModel.scale
       );
-      this.person.position.set(0, -125 * this.scale, 0);
+      this.person.position.set(0, -125 * this.playerModel.scale, 0);
       this.player.add(this.person);
       this.reset();
 
       // 创建人物 mixer 与 actions
       this.personMixer = new THREE.AnimationMixer(this.person);
-
       const animations = gltf.animations ?? [];
       this.personActions = new Map<string, THREE.AnimationAction>();
-
-      // console.log('角色所有动画', animations);
       // 取出动作并注册到 map
       const findClip = (name: string) =>
         animations.find((a: any) => a.name === name);
-      const regs13 = [
-        ["Idle_2", "idle"],
-        ["Walking_11", "walking"],
-        ["Left Walking_5", "left_walking"],
-        ["Right Walking_8", "right_walking"],
-        ["Walking Backward_10", "walking_backward"],
-        ["Jump_3", "jumping"],
-        ["Running_9", "running"],
-        ["Control Drone_1", "control_drone"],
-        ["Praying_7", "praying"],
+      // const regs:[string, string][] = [
+      //   ["Idle_2", "idle"],
+      //   ["Walking_11", "walking"],
+      //   ["Left Walking_5", "left_walking"],
+      //   ["Right Walking_8", "right_walking"],
+      //   ["Walking Backward_10", "walking_backward"],
+      //   ["Jump_3", "jumping"],
+      //   ["Running_9", "running"],
+      // ];
+
+      const regs: [string, string][] = [
+        [this.playerModel.idleAnim, "idle"],
+        [this.playerModel.walkAnim, "walking"],
+        [
+          this.playerModel.leftWalkAnim || this.playerModel.walkAnim,
+          "left_walking",
+        ],
+        [
+          this.playerModel.rightWalkAnim || this.playerModel.walkAnim,
+          "right_walking",
+        ],
+        [
+          this.playerModel.backwardAnim || this.playerModel.walkAnim,
+          "walking_backward",
+        ],
+        [this.playerModel.jumpAnim, "jumping"],
+        [this.playerModel.runAnim, "running"],
       ];
 
       // 注册动作并设置循环模式
-      for (const [key, clipName] of regs13) {
+      for (const [key, clipName] of regs) {
         const clip = findClip(key);
         if (!clip) continue;
         const action = this.personMixer.clipAction(clip);
@@ -334,8 +351,6 @@ class PlayerController {
       this.backwardAction = this.personActions.get("walking_backward")!;
       this.jumpAction = this.personActions.get("jumping")!;
       this.runAction = this.personActions.get("running")!;
-      this.controlDroneAction = this.personActions.get("control_drone")!;
-      this.prayingAction = this.personActions.get("praying")!;
 
       // 激活空闲动作
       this.idleAction.setEffectiveWeight(1);
@@ -366,62 +381,9 @@ class PlayerController {
     } catch (error) {}
   }
 
-  // 无人机加载
-  async loadDroneGLB() {
-    try {
-      const gltf: GLTF = await this.loader.loadAsync(this.droneModelUrl);
-      this.drone = gltf.scene;
-      this.drone.name = "无人机";
-      this.drone.scale.set(0.05, 0.05, 0.05);
-      this.drone.position.set(0, -120 * this.scale, 0);
-      this.drone.visible = false;
-
-      this.droneMixer = new THREE.AnimationMixer(this.drone);
-      this.droneMixer.timeScale = 100; // 加速动画
-
-      this.droneActions = new Map<string, THREE.AnimationAction>();
-      const droneClips = gltf.animations ?? [];
-      for (const clip of droneClips) {
-        const action = this.droneMixer.clipAction(clip);
-        action.enabled = true;
-        action.setEffectiveWeight(1);
-        action.play();
-        this.droneActions.set(clip.name, action);
-      }
-      // console.log("无人机模型加载完成");
-    } catch (error) {
-      // console.log(error);
-    }
-  }
-
-  // 无人机遥控器加载
-  async loadDroneControllerGLB() {
-    try {
-      const gltf: GLTF = await this.loader.loadAsync(this.remoteControlUrl);
-      this.droneController = gltf.scene;
-      this.droneController.name = "无人机遥控器";
-      this.droneController.scale.set(0.02, 0.02, 0.02);
-      this.droneController.position.set(
-        4.5 * this.scale,
-        -23 * this.scale,
-        18 * this.scale
-      );
-      this.droneController.rotateY(-Math.PI / 2);
-      this.droneController.rotateZ((Math.PI / 180) * -60);
-      this.droneController.visible = false;
-      this.player.add(this.droneController);
-      // console.log("遥控器", this.droneController);
-      // console.log("无人机遥控器模型加载完成");
-    } catch (err) {
-      // console.error("加载无人机遥控器失败：", err);
-    } finally {
-    }
-  }
-
   // 平滑切换人物动画
   playPersonAnimationByName(name: string, fade = 0.18) {
     if (!this.personActions) return;
-    if (this.isFlying && name !== "control_drone") return;
     if (this.ctPressed) return;
 
     const next = this.personActions.get(name);
@@ -449,23 +411,6 @@ class PlayerController {
     this.actionState = next;
   }
 
-  // 无人机动画播放
-  playDroneAnimationByName(name: string) {
-    if (!this.droneActions) return;
-    const action = this.droneActions.get(name);
-    if (!action) return;
-
-    try {
-      action.reset();
-      action.play();
-    } catch (e) {
-      // 回退
-      try {
-        action.play();
-      } catch (_) {}
-    }
-  }
-
   // 创建玩家胶囊体
   createPlayer() {
     const material = new THREE.MeshStandardMaterial({
@@ -479,18 +424,18 @@ class PlayerController {
 
     this.player = new THREE.Mesh(
       new RoundedBoxGeometry(
-        75.0 * this.scale,
-        180.0 * this.scale,
-        75.0 * this.scale,
-        100 * this.scale,
-        75 * this.scale
+        75.0 * this.playerModel.scale,
+        180.0 * this.playerModel.scale,
+        75.0 * this.playerModel.scale,
+        100 * this.playerModel.scale,
+        75 * this.playerModel.scale
       ),
       material
     ) as typeof this.player;
 
-    this.player.geometry.translate(0, -30 * this.scale, 0);
+    this.player.geometry.translate(0, -30 * this.playerModel.scale, 0);
     this.player.capsuleInfo = {
-      radius: 25 * this.scale,
+      radius: 25 * this.playerModel.scale,
       segment: new THREE.Line3(
         new THREE.Vector3(),
         new THREE.Vector3(0, -1.0, 0.0)
@@ -511,129 +456,81 @@ class PlayerController {
 
     this.updateMixers(delta);
 
-    if (this.isFlying) {
-      // 获取输入方向（WASD），组合为局部移动向量（在 XZ 平面）
-      this.moveDir.set(0, 0, 0);
-      if (this.fwdPressed) this.moveDir.add(this.DIR_FWD);
-      if (this.bkdPressed) this.moveDir.add(this.DIR_BKD);
-      if (this.lftPressed) this.moveDir.add(this.DIR_LFT);
-      if (this.rgtPressed) this.moveDir.add(this.DIR_RGT);
+    // 非路径行走逻辑
+    if (!this.collider) return;
+    this.camera.getWorldDirection(this.camDir);
+    let angle = Math.atan2(this.camDir.z, this.camDir.x) + Math.PI / 2;
+    angle = 2 * Math.PI - angle;
 
-      this.camera.getWorldDirection(this.camDir);
-      this.camDir.y = 0;
-      this.camDir.normalize();
+    this.moveDir.set(0, 0, 0);
+    if (this.fwdPressed) this.moveDir.add(this.DIR_FWD);
+    if (this.bkdPressed) this.moveDir.add(this.DIR_BKD);
+    if (this.lftPressed) this.moveDir.add(this.DIR_LFT);
+    if (this.rgtPressed) this.moveDir.add(this.DIR_RGT);
 
-      // 计算camRight
-      this._camRight.crossVectors(this.camera.up, this.camDir);
-      this._camRight.y = 0;
-      this._camRight.normalize();
-      // worldMove
-      this._worldMove.set(0, 0, 0);
-      this._worldMove.addScaledVector(this.camDir, -this.moveDir.z);
-      this._worldMove.addScaledVector(this._camRight, -this.moveDir.x);
-
-      // 垂直分量由Space/Control控制
-      let vy = 0;
-      if (this.spacePressed) vy += 1;
-      if (this.ctPressed) vy -= 1;
-
-      // 速度与冲刺
-      const boost = this.shiftPressed ? this.flightBoostMultiplier : 1;
-      // 基础平移速度
-      const horizVel = this._worldMove
-        .normalize()
-        .multiplyScalar(this.flightSpeed * boost * delta);
-      // 垂直速度
-      const vertVel = vy * this.flightVerticalSpeed * boost * delta;
-
-      // 应用阻尼/平滑：让 playerVelocity 作为惯性
-      const targetVel = new THREE.Vector3(horizVel.x, vertVel, horizVel.z);
-      this.playerVelocity.lerp(
-        targetVel,
-        1 - Math.pow(this.flightDamping, delta * 60)
-      ); // 平滑插值
-
-      // 更新位置
-      this.player.position.add(this.playerVelocity);
-      this.player.updateMatrixWorld();
-    } else {
-      // 非路径行走逻辑
-      if (!this.collider) return;
-      this.camera.getWorldDirection(this.camDir);
-      let angle = Math.atan2(this.camDir.z, this.camDir.x) + Math.PI / 2;
-      angle = 2 * Math.PI - angle;
-
-      this.moveDir.set(0, 0, 0);
-      if (this.fwdPressed) this.moveDir.add(this.DIR_FWD);
-      if (this.bkdPressed) this.moveDir.add(this.DIR_BKD);
-      if (this.lftPressed) this.moveDir.add(this.DIR_LFT);
-      if (this.rgtPressed) this.moveDir.add(this.DIR_RGT);
-
-      // 跳跃（短按）
-      if (this.spacePressed && this.playerIsOnGround) {
-        // 设置跳跃动作
-        this.playPersonAnimationByName("jumping");
-        // 延迟施加跳跃速度（与动画起跳同步）
-        setTimeout(() => {
-          this.playerVelocity.y = this.jumpHeight;
-          this.playerIsOnGround = false;
-          this.spacePressed = false;
-          this.player.position.addScaledVector(this.playerVelocity, delta);
-          this.player.updateMatrixWorld();
-        }, 200);
-      }
-
-      // 强行拉回（长按）
-      if (this.sustainSpacePressed && this.playerIsOnGround) {
-        this.playPersonAnimationByName("jumping");
-        setTimeout(() => {
-          this.playerVelocity.y = this.highJumpHeight;
-          this.playerIsOnGround = false;
-          this.spacePressed = false;
-          this.player.position.addScaledVector(this.playerVelocity, delta);
-          this.player.updateMatrixWorld();
-        }, 200);
-      }
-
-      // 设置速度
-      this.playerSpeed = this.shiftPressed
-        ? 900 * this.scale
-        : 400 * this.scale;
-      if (this.moveDir.lengthSq() > 1e-6) {
-        this.moveDir.normalize().applyAxisAngle(this.upVector, angle);
-        this.player.position.addScaledVector(
-          this.moveDir,
-          this.playerSpeed * delta
-        );
-      }
-
-      // 向下射线检测地面高度 超过阈值判定为没在地面 加上重力
-      let playerDistanceFromGround = Infinity;
-      this._originTmp.set(
-        this.player.position.x,
-        this.player.position.y,
-        this.player.position.z
-      );
-      this._raycaster.ray.origin.copy(this._originTmp);
-      const intersects = this._raycaster.intersectObject(
-        this.collider as THREE.Object3D,
-        false
-      );
-      if (intersects.length > 0) {
-        playerDistanceFromGround =
-          this.player.position.y - intersects[0].point.y;
-      }
-      if (playerDistanceFromGround > 130 * this.scale) {
-        // 重力
-        this.playerVelocity.y += delta * this.gravity;
+    // 跳跃（短按）
+    if (this.spacePressed && this.playerIsOnGround) {
+      // 设置跳跃动作
+      this.playPersonAnimationByName("jumping");
+      // 延迟施加跳跃速度（与动画起跳同步）
+      setTimeout(() => {
+        this.playerVelocity.y = this.jumpHeight;
+        this.playerIsOnGround = false;
+        this.spacePressed = false;
         this.player.position.addScaledVector(this.playerVelocity, delta);
-        // this.playerIsOnGround = false;
-      } else {
-        // 不设置重力
-        this.playerIsOnGround = true;
-      }
-      this.player.updateMatrixWorld();
+        this.player.updateMatrixWorld();
+      }, 200);
     }
+
+    // 强行拉回（长按）
+    if (this.sustainSpacePressed && this.playerIsOnGround) {
+      this.playPersonAnimationByName("jumping");
+      setTimeout(() => {
+        this.playerVelocity.y = this.highJumpHeight;
+        this.playerIsOnGround = false;
+        this.spacePressed = false;
+        this.player.position.addScaledVector(this.playerVelocity, delta);
+        this.player.updateMatrixWorld();
+      }, 200);
+    }
+
+    // 设置速度
+    this.playerSpeed = this.shiftPressed
+      ? 900 * this.playerModel.scale
+      : 400 * this.playerModel.scale;
+    if (this.moveDir.lengthSq() > 1e-6) {
+      this.moveDir.normalize().applyAxisAngle(this.upVector, angle);
+      this.player.position.addScaledVector(
+        this.moveDir,
+        this.playerSpeed * delta
+      );
+    }
+
+    // 向下射线检测地面高度 超过阈值判定为没在地面 加上重力
+    let playerDistanceFromGround = Infinity;
+    this._originTmp.set(
+      this.player.position.x,
+      this.player.position.y,
+      this.player.position.z
+    );
+    this._raycaster.ray.origin.copy(this._originTmp);
+    const intersects = this._raycaster.intersectObject(
+      this.collider as THREE.Object3D,
+      false
+    );
+    if (intersects.length > 0) {
+      playerDistanceFromGround = this.player.position.y - intersects[0].point.y;
+    }
+    if (playerDistanceFromGround > 130 * this.playerModel.scale) {
+      // 重力
+      this.playerVelocity.y += delta * this.gravity;
+      this.player.position.addScaledVector(this.playerVelocity, delta);
+      // this.playerIsOnGround = false;
+    } else {
+      // 不设置重力
+      this.playerIsOnGround = true;
+    }
+    this.player.updateMatrixWorld();
 
     // 碰撞检测
     const capsuleInfo = this.player.capsuleInfo;
@@ -699,9 +596,7 @@ class PlayerController {
       this.camDir.negate();
       this.moveDir.normalize();
       this.moveDir.negate(); // 翻转
-      const lookTarget = this.player.position
-        .clone()
-        .add(this.isFlying ? this.camDir : this.moveDir);
+      const lookTarget = this.player.position.clone().add(this.moveDir);
       this.targetMat.lookAt(this.player.position, lookTarget, this.player.up);
       this.targetQuat.setFromRotationMatrix(this.targetMat);
       const alpha = Math.min(1, this.rotationSpeed * delta);
@@ -711,7 +606,7 @@ class PlayerController {
     // 第三人称-相机跟随
     if (!this.isFirstPerson) {
       const lookTarget = this.player.position.clone();
-      lookTarget.y += this.isFlying ? 0 : 30 * this.scale;
+      lookTarget.y += 30 * this.playerModel.scale;
       this.camera.position.sub(this.controls.target); // 减去控制器向量
       this.controls.target.copy(lookTarget); // 设置控制器目标
       this.camera.position.add(lookTarget); // 设置相机位置
@@ -823,25 +718,6 @@ class PlayerController {
       this.scene.remove(this.person);
       this.person = null;
     }
-    if (this.drone) {
-      this.scene.remove(this.drone);
-      (this.drone as any) = null;
-    }
-    if (this.droneController) {
-      this.scene.remove(this.droneController);
-      (this.droneController as any) = null;
-    }
-    if (this.tipCard) {
-      this.scene.remove(this.tipCard);
-      (this.tipCard as any) = null;
-    }
-    if (this.confirmCard) {
-      this.scene.remove(this.confirmCard);
-      (this.confirmCard as any) = null;
-    }
-
-    this.isFlying = false;
-    this.isFirstFlying = true;
 
     this.resetControls();
 
@@ -925,91 +801,6 @@ class PlayerController {
       case "KeyV":
         this.changeView();
         break;
-      case "KeyF": {
-        // 切换飞行
-        this.isFlying = !this.isFlying;
-        if (!this.drone || !this.person || !this.droneController) return;
-        if (this.isFirstPerson)
-          this.camera.position.set(
-            0,
-            this.isFlying ? -110 * this.scale : 40 * this.scale,
-            30 * this.scale
-          );
-        if (this.isFlying) {
-          // 人物挂到场景
-          this.scene.attach(this.person);
-          this.person.updateMatrixWorld(true);
-          // 无人机遥控器挂到场景
-          this.scene.attach(this.droneController);
-          this.droneController.updateMatrixWorld(true);
-          this.droneController.visible = true; // 显示无人机遥控器
-          // console.log("切换到飞行模式", this.droneController);
-          if (this.isFirstFlying) {
-            // 首次进入飞行
-            this.isFirstFlying = false;
-            this.drone.visible = true;
-            this.drone.position.copy(this.person.position);
-
-            this.drone.position.y += 20 * this.scale;
-            this.drone.quaternion.copy(this.person.quaternion);
-            this.drone.updateMatrixWorld(true);
-
-            // 无人机挂回到胶囊体
-            this.player.attach(this.drone);
-            const forward = new THREE.Vector3(0, 0, 1)
-              .applyQuaternion(this.player.quaternion)
-              .normalize();
-            this.player.position
-              .copy(this.person.position)
-              .addScaledVector(forward, 250 * this.scale);
-
-            // 计算当前位置高度
-            this._originTmp.set(
-              this.player.position.x,
-              999999,
-              this.player.position.z
-            );
-            this._raycaster.ray.origin.copy(this._originTmp);
-            const intersects = this._raycaster.intersectObject(
-              this.collider as THREE.Object3D,
-              false
-            );
-            if (intersects.length > 0) {
-              // console.log("intersects[0].point.y", intersects[0].point.y);
-              this.player.position.y = intersects[0].point.y + 110 * this.scale;
-            }
-          } else {
-            // 胶囊体坐标设置到无人机模型位置上
-            this.player.position.copy(this.drone.position);
-            this.player.position.y += 110 * this.scale;
-            this.player.quaternion.copy(this.drone.quaternion);
-            this.player.updateMatrixWorld(true);
-            // 无人机挂回到胶囊体
-            this.player.attach(this.drone);
-          }
-          this.drone.updateMatrixWorld(true); // 更新矩阵
-          this.playPersonAnimationByName("control_drone"); // 播放人物操作无人机动画
-        } else {
-          // 退出飞行
-          // 无人机挂回场景
-          this.scene.attach(this.drone);
-          this.drone.updateMatrixWorld(true);
-          // 胶囊体坐标设置到人物模型位置上
-          this.player.position.copy(this.person.position);
-          this.player.position.y += 120 * this.scale;
-          this.player.quaternion.copy(this.person.quaternion);
-          this.player.updateMatrixWorld(true);
-          // 人物挂回到胶囊体
-          this.player.attach(this.person);
-          this.person.updateMatrixWorld(true);
-          this.playPersonAnimationByName("idle"); // 播放人物空闲动画
-          // 无人机遥控器挂回到胶囊体
-          this.player.attach(this.droneController);
-          this.droneController.updateMatrixWorld(true);
-          this.droneController.visible = false; // 隐藏无人机遥控器
-        }
-        break;
-      }
     }
   };
 
@@ -1299,9 +1090,17 @@ export function usePlayer() {
         scene: THREE.Scene;
         camera: THREE.PerspectiveCamera;
         controls: OrbitControls;
-        playerModelUrl: string;
-        droneModelUrl: string;
-        remoteControlUrl: string;
+        playerModel: {
+          url: string;
+          idleAnim: string;
+          walkAnim: string;
+          runAnim: string;
+          jumpAnim: string;
+          leftWalkAnim?: string;
+          rightWalkAnim?: string;
+          backwardAnim?: string;
+          scale?: number;
+        };
         initPos?: THREE.Vector3;
         scale?: number;
       },
