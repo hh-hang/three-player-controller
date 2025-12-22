@@ -23,7 +23,7 @@ let controls;
 let gltfLoader;
 
 let isUpdatePlayer = false; // 是否更新玩家位置
-const modelUrl = "/glb/burnout_revenge_-_central_route_crash_junction.glb";
+const modelUrl = "./glb/burnout_revenge_-_central_route_crash_junction.glb";
 
 const pos = new THREE.Vector3(21.88, 3, 10.98);
 
@@ -60,7 +60,7 @@ async function init() {
     camera,
     controls,
     playerModel: {
-        url: "/glb/person.glb",
+        url: "./glb/person.glb",
         scale: 0.001,
         idleAnim: "Idle_2",
         walkAnim: "Walking_11",
@@ -159,7 +159,7 @@ async function initBackground() {
 
     return new Promise((resolve, reject) => {
     try {
-        new HDRLoader().load("/sky/1.hdr", (texture) => {
+        new HDRLoader().load("./sky/1.hdr", (texture) => {
         texture.mapping = THREE.EquirectangularReflectionMapping;
         scene.background = texture;
         // scene.environment = texture;
