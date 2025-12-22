@@ -28,6 +28,10 @@ class PlayerController {
         rightWalkAnim?: string;
         backwardAnim?: string;
         scale: number;
+        gravity?: number;
+        jumpHeight?: number;
+        highJumpHeight?: number;
+        speed?: number;
     };
     visualizeDepth!: number;
     gravity!: number;
@@ -455,10 +459,8 @@ class PlayerController {
             // 重力
             this.playerVelocity.y += delta * this.gravity;
             this.player.position.addScaledVector(this.playerVelocity, delta);
-            console.log("delta * this.gravity", delta * this.gravity);
         } else {
             // 在地面
-            console.log("在地面");
             this.playerVelocity.set(0, 0, 0);
             this.playerIsOnGround = true;
         }
@@ -959,6 +961,10 @@ export function playerController() {
                     rightWalkAnim?: string;
                     backwardAnim?: string;
                     scale: number;
+                    gravity?: number;
+                    jumpHeight?: number;
+                    highJumpHeight?: number;
+                    speed?: number;
                 };
                 initPos?: THREE.Vector3;
                 mouseSensity?: number;
@@ -988,4 +994,3 @@ export function offAllEvent(): void {
     if (!controllerInstance) return;
     controllerInstance.offAllEvent();
 }
-
