@@ -1,6 +1,10 @@
 # three-player-controller
 
-轻量的第三人称 / 第一人称玩家控制器，基于 three.js 和 three-mesh-bvh 实现人物胶囊体碰撞、BVH 碰撞检测、人物动画、第一/三人称切换与相机避障。此仓库包含库源码、example 演示。
+轻量的第三人称 / 第一人称玩家控制器，开箱即用，基于 three.js 和 three-mesh-bvh 实现人物胶囊体碰撞、BVH 碰撞检测、人物动画、第一/三人称切换与相机避障。k此仓库包含库源码、example 演示。
+
+# 安装
+
+npm install three-player-controller
 
 # 示例
 
@@ -11,10 +15,6 @@
 
 ### 第三人称相机避障
 ![第三人称相机避障](example/public/gif/2.gif)
-
-# 安装
-
-npm install three-player-controller
 
 # 使用
 
@@ -46,4 +46,4 @@ player.update();
 
 [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh)
 
-[three] (https://github.com/mrdoob/three.js)
+[three](https://github.com/mrdoob/three.js)
