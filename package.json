@@ -1,6 +1,6 @@
 {
   "name": "three-player-controller",
-  "version": "0.1.2",
+  "version": "0.1.6",
   "description": "Third-person / first-person player controller for three.js (three-mesh-bvh based)",
   "author": "",
   "license": "MIT",
@@ -17,18 +17,22 @@
     }
   },
   "scripts": {
+    "dev": "vite",
     "build": "tsup",
     "clean": "rimraf dist",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "build:example": "vite build",
+    "dev:example": "vite example"
   },
   "peerDependencies": {
     "three": "^0.182.0",
     "three-mesh-bvh": "^0.9.1"
   },
   "devDependencies": {
+    "@types/three": "^0.182.0",
+    "rimraf": "^6.0.0",
     "tsup": "^8.0.1",
     "typescript": "^5.4.0",
-    "@types/three": "^0.182.0",
-    "rimraf": "^6.0.0"
+    "vite": "^7.3.0"
   }
 }
