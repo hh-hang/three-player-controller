@@ -398,6 +398,24 @@ class PlayerController {
         this.reset();
     }
 
+    getAngleWithYAxis(normal: { x: number; y: number; z: number }): number {
+        // Y轴正方向向量
+        const yAxis = { x: 0, y: 1, z: 0 };
+
+        // 向量点积
+        const dotProduct = normal.x * yAxis.x + normal.y * yAxis.y + normal.z * yAxis.z;
+
+        // 向量模长
+        const normalMagnitude = Math.sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+        const yAxisMagnitude = 1; // Y轴单位向量长度为1
+
+        // 计算夹角余弦值
+        const cosTheta = dotProduct / (normalMagnitude * yAxisMagnitude);
+
+        // 返回夹角（弧度）
+        return Math.acos(cosTheta);
+    }
+
     // 每帧更新
     async update(delta: number = clock.getDelta()) {
         if (!this.isupdate || !this.player) return;
@@ -457,24 +475,32 @@ class PlayerController {
         const intersects = this._raycaster.intersectObject(this.collider as THREE.Object3D, false);
         if (intersects.length > 0) {
             playerDistanceFromGround = this.player.position.y - intersects[0].point.y;
+            const normal = intersects[0].normal as THREE.Vector3;
+            const angle = (this.getAngleWithYAxis(normal) * 180) / Math.PI;
+            const h = this.playerHeight * this.playerModel.scale * 0.9; // 阈值
+            const minH = this.playerHeight * this.playerModel.scale * 0.7; // 最小高度(小于此高度说明人物卡住，需要强行拉回)
+            if (playerDistanceFromGround > h) {
+                // 重力
+                this.playerVelocity.y += delta * this.gravity;
+                this.player.position.addScaledVector(this.playerVelocity, delta);
+            } else if (playerDistanceFromGround > minH && playerDistanceFromGround < h) {
+                if (angle > 5 && angle < 50) {
+                    // 在坡上
+                    this.playerIsOnGround = true;
+                } else {
+                    // 不在坡上
+                    this.playerVelocity.set(0, 0, 0);
+                    this.player.position.set(this.player.position.x, intersects[0].point.y + h * 0.75, this.player.position.z);
+                    this.playerIsOnGround = true;
+                }
+            } else if (playerDistanceFromGround < minH) {
+                // 强行拉回
+                this.playerVelocity.set(0, 0, 0);
+                this.player.position.set(this.player.position.x, intersects[0].point.y + h * 0.75, this.player.position.z);
+                this.playerIsOnGround = true;
+            }
         }
 
-        const h = this.playerHeight * this.playerModel.scale * 0.9; // 阈值
-        const minH = this.playerHeight * this.playerModel.scale * 0.7; // 最小高度(小于此高度说明人物卡住，需要强行拉回)
-        if (playerDistanceFromGround > h) {
-            // 重力
-            this.playerVelocity.y += delta * this.gravity;
-            this.player.position.addScaledVector(this.playerVelocity, delta);
-            this.playerIsOnGround = false;
-        } else if (playerDistanceFromGround < minH) {
-            // 强行拉回
-            this.player.position.set(this.player.position.x, intersects[0].point.y + h * 0.75, this.player.position.z);
-            this.playerIsOnGround = true;
-        } else {
-            // 在地面
-            this.playerVelocity.set(0, 0, 0);
-            this.playerIsOnGround = true;
-        }
         this.player.updateMatrixWorld();
 
         // 碰撞检测
