@@ -1,6 +1,6 @@
 {
   "name": "three-player-controller",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Third-person / first-person player controller for three.js (three-mesh-bvh based)",
   "author": "",
   "license": "MIT",
