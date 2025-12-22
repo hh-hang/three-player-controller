@@ -5,3 +5,45 @@
 # 示例
 
 [Player Controller](https://hh-hang.github.io/three-player-controller/)
+
+### 控制
+![控制演示](example/public/gif/1.gif)
+
+### 第三人称相机避障
+![第三人称相机避障](example/public/gif/2.gif)
+
+# 安装
+
+npm install three-player-controller
+
+# 使用
+
+```js
+import * as THREE from "three";
+import { playerController } from "three-player-controller";
+
+// 初始化玩家控制器
+player.init({
+    scene, // three.js 场景
+    camera, // three.js 相机
+    controls, // three.js 控制器
+    playerModel: {
+        url: "./glb/person.glb", // 模型路径
+        scale: 0.001, // 模型缩放
+        idleAnim: "Idle_2", // 默认 Idle 动画名字
+        walkAnim: "Walking_11", // 默认 Walk 动画名字
+        runAnim: "Running_9", // 默认 Run 动画名字
+        jumpAnim: "Jump_3", // 默认 Jump 动画名字
+    },
+    initPos: pos, // 初始位置
+});
+
+// 渲染循环调用
+player.update();
+
+```
+# 感谢
+
+[three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh)
+
+[three] (https://github.com/mrdoob/three.js)

@@ -56,18 +56,18 @@ async function init() {
 
     // 初始化玩家控制器
     player.init({
-    scene,
-    camera,
-    controls,
-    playerModel: {
-        url: "./glb/person.glb",
-        scale: 0.001,
-        idleAnim: "Idle_2",
-        walkAnim: "Walking_11",
-        runAnim: "Running_9",
-        jumpAnim: "Jump_3",
-    },
-    initPos: pos,
+        scene,
+        camera,
+        controls,
+        playerModel: {
+            url: "./glb/person.glb",
+            scale: 0.001,
+            idleAnim: "Idle_2",
+            walkAnim: "Walking_11",
+            runAnim: "Running_9",
+            jumpAnim: "Jump_3",
+        },
+        initPos: pos,
     });
 
     window.addEventListener("resize", onWindowResize, false);
