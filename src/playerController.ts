@@ -29,15 +29,14 @@ class PlayerController {
   };
   isFirstPerson: boolean = false;
 
-  mouseSensity: number = 5;
-  boundingBoxMinY: number = 0;
-
   visualizeDepth: number;
   gravity: number;
   jumpHeight: number;
   highJumpHeight: number;
   playerSpeed: number;
+  mouseSensity: number;
 
+  boundingBoxMinY: number = 0;
   // 测试参数
   displayPlayer: boolean = false;
   displayCollider: boolean = false;
@@ -143,7 +142,7 @@ class PlayerController {
         scale?: number;
       };
       initPos?: THREE.Vector3;
-      scale?: number;
+      mouseSensity?: number;
     },
     callback?: () => void
   ) {
@@ -153,6 +152,7 @@ class PlayerController {
     this.playerModel = opts.playerModel;
     this.playerModel.scale = opts.playerModel.scale ? opts.playerModel.scale : 1;
     this.initPos = opts.initPos ? opts.initPos : new THREE.Vector3(0, 0, 0);
+    this.mouseSensity = opts.mouseSensity ? opts.mouseSensity : 5;
 
     this.visualizeDepth = 0 * this.playerModel.scale;
     this.gravity = -2400 * this.playerModel.scale;
@@ -271,9 +271,9 @@ class PlayerController {
       this.person = gltf.scene;
       this.person.name = "角色";
       this.person.scale.set(
-        0.9 * this.playerModel.scale,
-        0.9 * this.playerModel.scale,
-        0.9 * this.playerModel.scale
+        this.playerModel.scale,
+        this.playerModel.scale,
+        this.playerModel.scale
       );
       this.person.position.set(0, -125 * this.playerModel.scale, 0);
       this.player.add(this.person);
@@ -1069,7 +1069,7 @@ class PlayerController {
 }
 
 // 导出API
-export function usePlayer() {
+export function playerController() {
   if (!controllerInstance) controllerInstance = new PlayerController();
   const c = controllerInstance;
   return {
@@ -1090,7 +1090,7 @@ export function usePlayer() {
           scale?: number;
         }
         initPos?: THREE.Vector3;
-        scale?: number;
+        mouseSensity?: number;
       },
       callback?: () => void
     ) => c.init(opts, callback),
@@ -1100,6 +1100,9 @@ export function usePlayer() {
     reset: (pos?: THREE.Vector3) => c.reset(pos),
     updatePlayer: (dt: number) => c.updatePlayer(dt),
     destroy: () => c.destroy(),
+    displayCollider: c.displayCollider,
+    displayPlayer: c.displayPlayer,
+    displayVisualizer: c.displayVisualizer,
   };
 }
 
