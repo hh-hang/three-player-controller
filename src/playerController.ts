@@ -477,26 +477,34 @@ class PlayerController {
             playerDistanceFromGround = this.player.position.y - intersects[0].point.y;
             const normal = intersects[0].normal as THREE.Vector3;
             const angle = (this.getAngleWithYAxis(normal) * 180) / Math.PI;
-            const h = this.playerHeight * this.playerModel.scale * 0.9; // 阈值
-            const minH = this.playerHeight * this.playerModel.scale * 0.7; // 最小高度(小于此高度说明人物卡住，需要强行拉回)
-            if (playerDistanceFromGround > h) {
-                // 重力
+            const maxH = this.playerHeight * this.playerModel.scale * 0.9; // 坡度高度阈值
+            const h = this.playerHeight * this.playerModel.scale * 0.75; // 正常高度
+            const minH = this.playerHeight * this.playerModel.scale * 0.7; // 最小高度
+
+            if (playerDistanceFromGround > maxH) {
                 this.playerVelocity.y += delta * this.gravity;
                 this.player.position.addScaledVector(this.playerVelocity, delta);
-            } else if (playerDistanceFromGround > minH && playerDistanceFromGround < h) {
-                if (angle > 5 && angle < 50) {
-                    // 在坡上
-                    this.playerIsOnGround = true;
+                this.playerIsOnGround = false;
+            } else if (playerDistanceFromGround > h && playerDistanceFromGround < maxH) {
+                if (angle >= 0 && angle < 5) {
+                    // 平地
+                    console.log("平地");
+                    this.playerVelocity.y += delta * this.gravity;
+                    this.player.position.addScaledVector(this.playerVelocity, delta);
+                    this.playerIsOnGround = false;
                 } else {
-                    // 不在坡上
+                    // 坡地
                     this.playerVelocity.set(0, 0, 0);
-                    this.player.position.set(this.player.position.x, intersects[0].point.y + h * 0.75, this.player.position.z);
                     this.playerIsOnGround = true;
                 }
+            } else if (playerDistanceFromGround > minH && playerDistanceFromGround < h) {
+                // 误差范围内 在平地
+                this.playerVelocity.set(0, 0, 0);
+                this.playerIsOnGround = true;
             } else if (playerDistanceFromGround < minH) {
                 // 强行拉回
                 this.playerVelocity.set(0, 0, 0);
-                this.player.position.set(this.player.position.x, intersects[0].point.y + h * 0.75, this.player.position.z);
+                this.player.position.set(this.player.position.x, intersects[0].point.y + h, this.player.position.z);
                 this.playerIsOnGround = true;
             }
         }
