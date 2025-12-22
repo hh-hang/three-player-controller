@@ -21,7 +21,8 @@
     "build": "tsup",
     "clean": "rimraf dist",
     "prepare": "npm run build",
-    "build:example": "vite build"
+    "build:example": "vite build",
+    "dev:example": "vite example"
   },
   "peerDependencies": {
     "three": "^0.182.0",

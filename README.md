@@ -4,4 +4,4 @@
 
 # 示例
 
-[Player Controller]()
+[Player Controller](https://hh-hang.github.io/three-player-controller/)
