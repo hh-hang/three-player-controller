@@ -150,7 +150,9 @@ class PlayerController {
     this.camera = opts.camera;
     this.controls = opts.controls;
     this.playerModel = opts.playerModel;
-    this.playerModel.scale = opts.playerModel.scale ? opts.playerModel.scale : 1;
+    this.playerModel.scale = opts.playerModel.scale
+      ? opts.playerModel.scale
+      : 1;
     this.initPos = opts.initPos ? opts.initPos : new THREE.Vector3(0, 0, 0);
     this.mouseSensity = opts.mouseSensity ? opts.mouseSensity : 5;
 
@@ -212,7 +214,11 @@ class PlayerController {
   // 摄像机/控制器设置
   setCameraPos() {
     if (this.isFirstPerson) {
-      this.camera.position.set(0, 40 * this.playerModel.scale, 30 * this.playerModel.scale);
+      this.camera.position.set(
+        0,
+        40 * this.playerModel.scale,
+        30 * this.playerModel.scale
+      );
     } else {
       const worldPos = this.player.position.clone();
       const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
@@ -296,12 +302,21 @@ class PlayerController {
       //   ["Running_9", "running"],
       // ];
 
-      const regs:[string, string][] = [
+      const regs: [string, string][] = [
         [this.playerModel.idleAnim, "idle"],
         [this.playerModel.walkAnim, "walking"],
-        [this.playerModel.leftWalkAnim || this.playerModel.walkAnim, "left_walking"],
-        [this.playerModel.rightWalkAnim || this.playerModel.walkAnim, "right_walking"],
-        [this.playerModel.backwardAnim || this.playerModel.walkAnim, "walking_backward"],
+        [
+          this.playerModel.leftWalkAnim || this.playerModel.walkAnim,
+          "left_walking",
+        ],
+        [
+          this.playerModel.rightWalkAnim || this.playerModel.walkAnim,
+          "right_walking",
+        ],
+        [
+          this.playerModel.backwardAnim || this.playerModel.walkAnim,
+          "walking_backward",
+        ],
         [this.playerModel.jumpAnim, "jumping"],
         [this.playerModel.runAnim, "running"],
       ];
@@ -440,7 +455,7 @@ class PlayerController {
     delta = Math.min(delta, 1 / 30);
 
     this.updateMixers(delta);
-    
+
     // 非路径行走逻辑
     if (!this.collider) return;
     this.camera.getWorldDirection(this.camDir);
@@ -504,8 +519,7 @@ class PlayerController {
       false
     );
     if (intersects.length > 0) {
-      playerDistanceFromGround =
-        this.player.position.y - intersects[0].point.y;
+      playerDistanceFromGround = this.player.position.y - intersects[0].point.y;
     }
     if (playerDistanceFromGround > 130 * this.playerModel.scale) {
       // 重力
@@ -582,9 +596,7 @@ class PlayerController {
       this.camDir.negate();
       this.moveDir.normalize();
       this.moveDir.negate(); // 翻转
-      const lookTarget = this.player.position
-        .clone()
-        .add( this.moveDir);
+      const lookTarget = this.player.position.clone().add(this.moveDir);
       this.targetMat.lookAt(this.player.position, lookTarget, this.player.up);
       this.targetQuat.setFromRotationMatrix(this.targetMat);
       const alpha = Math.min(1, this.rotationSpeed * delta);
@@ -1088,7 +1100,7 @@ export function playerController() {
           rightWalkAnim?: string;
           backwardAnim?: string;
           scale?: number;
-        }
+        };
         initPos?: THREE.Vector3;
         mouseSensity?: number;
       },
