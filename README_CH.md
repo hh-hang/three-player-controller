@@ -12,11 +12,11 @@ npm install three-player-controller
 
 ### 控制
 
-![控制演示](example/public/gif/1.gif)
+![控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
 
 ### 第三人称相机避障
 
-![第三人称相机避障](example/public/gif/2.gif)
+![第三人称相机避障](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
 
 # 使用
 

@@ -12,11 +12,11 @@ npm install three-player-controller
 
 ### Controls
 
-![Controls](example/public/gif/1.gif)
+![Controls](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
 
 ### Third-person camera obstacle avoidance
 
-![Third-person camera obstacle avoidance](example/public/gif/2.gif)
+![Third-person camera obstacle avoidance](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
 
 # Usage
 
