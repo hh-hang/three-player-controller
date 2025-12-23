@@ -382,6 +382,7 @@ class PlayerController {
         material.transparent = true;
         material.opacity = this.displayPlayer ? 0.5 : 0;
         material.wireframe = true;
+        material.depthWrite = false;
 
         const r = this.playerRadius * this.playerModel.scale;
         const h = this.playerHeight * this.playerModel.scale;
@@ -488,10 +489,9 @@ class PlayerController {
             } else if (playerDistanceFromGround > h && playerDistanceFromGround < maxH) {
                 if (angle >= 0 && angle < 5) {
                     // 平地
-                    console.log("平地");
-                    this.playerVelocity.y += delta * this.gravity;
-                    this.player.position.addScaledVector(this.playerVelocity, delta);
-                    this.playerIsOnGround = false;
+                    this.player.position.y = intersects[0].point.y + h;
+                    this.playerVelocity.set(0, 0, 0);
+                    this.playerIsOnGround = true;
                 } else {
                     // 坡地
                     this.playerVelocity.set(0, 0, 0);
@@ -962,12 +962,6 @@ class PlayerController {
         (merged as any).boundsTree = new MeshBVH(merged);
         this.collider = new THREE.Mesh(
             merged,
-            // new THREE.MeshBasicMaterial({
-            //     color: "red",
-            //     opacity: 0.2,
-            //     transparent: true,
-            //     wireframe: false,
-            // })
             new THREE.MeshBasicMaterial({
                 opacity: 0.5,
                 transparent: true,
