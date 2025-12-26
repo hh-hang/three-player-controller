@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { MeshBVH, MeshBVHHelper } from "three-mesh-bvh";
+import type { GLTF } from "three/examples/jsm/Addons.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { GLTF } from "three/examples/jsm/Addons.js";
 
 let controllerInstance: PlayerController | null = null; // 单例实例
 const clock = new THREE.Clock();
@@ -27,16 +27,16 @@ class PlayerController {
         leftWalkAnim?: string;
         rightWalkAnim?: string;
         backwardAnim?: string;
+        flyAnim?: string;
+        flyIdleAnim?: string;
         scale: number;
         gravity?: number;
         jumpHeight?: number;
-        highJumpHeight?: number;
         speed?: number;
     };
     visualizeDepth!: number;
     gravity!: number;
     jumpHeight!: number;
-    highJumpHeight!: number;
     playerSpeed!: number;
     mouseSensity!: number;
 
@@ -58,6 +58,7 @@ class PlayerController {
     //  状态开关
     playerIsOnGround: boolean = false;
     isupdate: boolean = true;
+    isFlying: boolean = false;
 
     //  输入状态
     fwdPressed: boolean = false;
@@ -67,8 +68,6 @@ class PlayerController {
     spacePressed: boolean = false;
     ctPressed: boolean = false;
     shiftPressed: boolean = false;
-    sustainSpacePressed: boolean = false;
-    spaceLongPressTimer: number | null = null;
 
     // 第三人称
     _camCollisionLerp: number = 0.18; // 平滑系数
@@ -89,9 +88,7 @@ class PlayerController {
 
     //  动画相关
     personMixer?: THREE.AnimationMixer;
-    droneMixer?: THREE.AnimationMixer;
     personActions?: Map<string, THREE.AnimationAction>;
-    droneActions?: Map<string, THREE.AnimationAction>;
     idleAction!: THREE.AnimationAction;
     walkAction!: THREE.AnimationAction;
     leftWalkAction!: THREE.AnimationAction;
@@ -99,6 +96,8 @@ class PlayerController {
     backwardAction!: THREE.AnimationAction;
     jumpAction!: THREE.AnimationAction;
     runAction!: THREE.AnimationAction;
+    flyidleAction!: THREE.AnimationAction;
+    flyAction!: THREE.AnimationAction;
     controlDroneAction!: THREE.AnimationAction;
     actionState!: THREE.AnimationAction;
 
@@ -112,6 +111,7 @@ class PlayerController {
     readonly DIR_BKD = new THREE.Vector3(0, 0, 1);
     readonly DIR_LFT = new THREE.Vector3(-1, 0, 0);
     readonly DIR_RGT = new THREE.Vector3(1, 0, 0);
+    readonly DIR_Y = new THREE.Vector3(0, 1, 0);
 
     readonly _personToCam = new THREE.Vector3();
 
@@ -140,10 +140,11 @@ class PlayerController {
                 leftWalkAnim?: string;
                 rightWalkAnim?: string;
                 backwardAnim?: string;
+                flyAnim?: string;
+                flyIdleAnim?: string;
                 scale: number;
                 gravity?: number;
                 jumpHeight?: number;
-                highJumpHeight?: number;
                 speed?: number;
             };
             initPos?: THREE.Vector3;
@@ -161,8 +162,7 @@ class PlayerController {
         const s = this.playerModel.scale;
         this.visualizeDepth = 0 * s;
         this.gravity = opts.playerModel.gravity ? opts.playerModel.gravity * s : -2400 * s;
-        this.jumpHeight = opts.playerModel.jumpHeight ? opts.playerModel.jumpHeight * s : 300 * s;
-        this.highJumpHeight = opts.playerModel.highJumpHeight ? opts.playerModel.highJumpHeight * s : 1000 * s;
+        this.jumpHeight = opts.playerModel.jumpHeight ? opts.playerModel.jumpHeight * s : 800 * s;
         this.playerSpeed = opts.playerModel.speed ? opts.playerModel.speed * s : 400 * s;
 
         this._camCollisionLerp = 0.18;
@@ -225,7 +225,7 @@ class PlayerController {
     // 设置控制器
     setControls() {
         this.controls.enabled = false;
-        this.controls.maxPolarAngle = Math.PI * (230 / 360);
+        this.controls.maxPolarAngle = Math.PI * (300 / 360);
     }
 
     // 重置控制器
@@ -270,6 +270,7 @@ class PlayerController {
             // 创建人物 mixer 与 actions
             this.personMixer = new THREE.AnimationMixer(this.person);
             const animations = gltf.animations ?? [];
+            console.log('animations',animations)
             this.personActions = new Map<string, THREE.AnimationAction>();
             // 取出动作并注册到 map
             const findClip = (name: string) => animations.find((a: any) => a.name === name);
@@ -281,6 +282,8 @@ class PlayerController {
                 [this.playerModel.backwardAnim || this.playerModel.walkAnim, "walking_backward"],
                 [this.playerModel.jumpAnim, "jumping"],
                 [this.playerModel.runAnim, "running"],
+                [this.playerModel.flyIdleAnim || this.playerModel.idleAnim, "flyidle"],
+                [this.playerModel.flyAnim || this.playerModel.idleAnim, "flying"],
             ];
 
             // 注册动作并设置循环模式
@@ -312,6 +315,8 @@ class PlayerController {
             this.backwardAction = this.personActions.get("walking_backward")!;
             this.jumpAction = this.personActions.get("jumping")!;
             this.runAction = this.personActions.get("running")!;
+            this.flyidleAction = this.personActions.get("flyidle")!;
+            this.flyAction = this.personActions.get("flying")!;
 
             // 激活空闲动作
             this.idleAction.setEffectiveWeight(1);
@@ -344,6 +349,7 @@ class PlayerController {
 
     // 平滑切换人物动画
     playPersonAnimationByName(name: string, fade = 0.18) {
+        // console.log("播放动画", name);
         if (!this.personActions) return;
         if (this.ctPressed) return;
 
@@ -419,13 +425,11 @@ class PlayerController {
 
     // 每帧更新
     async update(delta: number = clock.getDelta()) {
-        if (!this.isupdate || !this.player) return;
+        if (!this.isupdate || !this.player || !this.collider) return;
+        delta = Math.min(delta, 1 / 60);
 
-        delta = Math.min(delta, 1 / 30);
+        if (!this.isFlying) this.player.position.addScaledVector(this.playerVelocity, delta);
         this.updateMixers(delta);
-
-        // 非路径行走逻辑
-        if (!this.collider) return;
         this.camera.getWorldDirection(this.camDir);
         let angle = Math.atan2(this.camDir.z, this.camDir.x) + Math.PI / 2;
         angle = 2 * Math.PI - angle;
@@ -435,41 +439,19 @@ class PlayerController {
         if (this.bkdPressed) this.moveDir.add(this.DIR_BKD);
         if (this.lftPressed) this.moveDir.add(this.DIR_LFT);
         if (this.rgtPressed) this.moveDir.add(this.DIR_RGT);
-
-        // 跳跃（短按）
-        if (this.spacePressed && this.playerIsOnGround) {
-            // 设置跳跃动作
-            this.playPersonAnimationByName("jumping");
-            // 延迟施加跳跃速度（与动画起跳同步）
-            setTimeout(() => {
-                this.playerVelocity.y = this.jumpHeight;
-                this.playerIsOnGround = false;
-                this.spacePressed = false;
-                this.player.position.addScaledVector(this.playerVelocity, delta);
-                this.player.updateMatrixWorld();
-            }, 200);
+        if (this.isFlying && this.fwdPressed) {
+            this.moveDir.y = this.camDir.y;
         }
-
-        // 强行拉回（长按）
-        if (this.sustainSpacePressed && this.playerIsOnGround) {
-            this.playPersonAnimationByName("jumping");
-            setTimeout(() => {
-                this.playerVelocity.y = this.highJumpHeight;
-                this.playerIsOnGround = false;
-                this.spacePressed = false;
-                this.player.position.addScaledVector(this.playerVelocity, delta);
-                this.player.updateMatrixWorld();
-            }, 200);
-        }
-
         // 设置速度
-        this.playerSpeed = this.shiftPressed ? 900 * this.playerModel.scale : 400 * this.playerModel.scale;
-        if (this.moveDir.lengthSq() > 1e-6) {
-            this.moveDir.normalize().applyAxisAngle(this.upVector, angle);
-            this.player.position.addScaledVector(this.moveDir, this.playerSpeed * delta);
+        if (this.isFlying && this.fwdPressed) {
+            this.playerSpeed = this.shiftPressed ? 4000 * this.playerModel.scale : 3000 * this.playerModel.scale;
+        } else {
+            this.playerSpeed = this.shiftPressed ? 900 * this.playerModel.scale : 400 * this.playerModel.scale;
         }
+        this.moveDir.normalize().applyAxisAngle(this.upVector, angle);
+        this.player.position.addScaledVector(this.moveDir, this.playerSpeed * delta);
 
-        // 向下射线检测地面高度 超过阈值判定为没在地面 加上重力
+        // 向下射线检测地面高度
         let playerDistanceFromGround = Infinity;
         this._originTmp.set(this.player.position.x, this.player.position.y, this.player.position.z);
         this._raycaster.ray.origin.copy(this._originTmp);
@@ -482,35 +464,40 @@ class PlayerController {
             const h = this.playerHeight * this.playerModel.scale * 0.75; // 正常高度
             const minH = this.playerHeight * this.playerModel.scale * 0.7; // 最小高度
 
-            if (playerDistanceFromGround > maxH) {
-                this.playerVelocity.y += delta * this.gravity;
-                this.player.position.addScaledVector(this.playerVelocity, delta);
-                this.playerIsOnGround = false;
-            } else if (playerDistanceFromGround > h && playerDistanceFromGround < maxH) {
-                if (angle >= 0 && angle < 5) {
-                    // 平地
-                    this.player.position.y = intersects[0].point.y + h;
+            if (this.isFlying) {
+            } else {
+                if (playerDistanceFromGround > maxH) {
+                    this.playerVelocity.y += delta * this.gravity;
+                    this.player.position.addScaledVector(this.playerVelocity, delta);
+                    this.playerIsOnGround = false;
+                } else if (playerDistanceFromGround > h && playerDistanceFromGround < maxH) {
+                    if (angle >= 0 && angle < 5) {
+                        // 平地
+                        // this.player.position.y = intersects[0].point.y + h;
+                        // this.playerVelocity.set(0, 0, 0);
+                        this.playerVelocity.y += delta * this.gravity;
+                        this.player.position.addScaledVector(this.playerVelocity, delta);
+                        this.playerIsOnGround = true;
+                    } else {
+                        // 坡地
+                        this.playerVelocity.set(0, 0, 0);
+                        this.playerIsOnGround = true;
+                    }
+                } else if (playerDistanceFromGround > minH && playerDistanceFromGround < h) {
+                    // 误差范围内 在平地
                     this.playerVelocity.set(0, 0, 0);
                     this.playerIsOnGround = true;
-                } else {
-                    // 坡地
+                } else if (playerDistanceFromGround < minH) {
+                    // 强行拉回
                     this.playerVelocity.set(0, 0, 0);
+                    this.player.position.set(this.player.position.x, intersects[0].point.y + h, this.player.position.z);
                     this.playerIsOnGround = true;
                 }
-            } else if (playerDistanceFromGround > minH && playerDistanceFromGround < h) {
-                // 误差范围内 在平地
-                this.playerVelocity.set(0, 0, 0);
-                this.playerIsOnGround = true;
-            } else if (playerDistanceFromGround < minH) {
-                // 强行拉回
-                this.playerVelocity.set(0, 0, 0);
-                this.player.position.set(this.player.position.x, intersects[0].point.y + h, this.player.position.z);
-                this.playerIsOnGround = true;
             }
         }
 
+        // 更新玩家矩阵
         this.player.updateMatrixWorld();
-
         // 碰撞检测
         const capsuleInfo = this.player.capsuleInfo;
         this.tempBox.makeEmpty();
@@ -523,8 +510,8 @@ class PlayerController {
         this.tempBox.expandByPoint(this.tempSegment.end);
         this.tempBox.expandByScalar(capsuleInfo.radius);
 
-        const bvh = this.collider?.geometry;
-        (bvh as any)?.boundsTree?.shapecast({
+        const bvh = this.collider?.geometry as any;
+        bvh?.boundsTree?.shapecast({
             // 检测包围盒碰撞
             intersectsBounds: (box: THREE.Box3) => box.intersectsBox(this.tempBox),
             // 检测三角形碰撞
@@ -545,14 +532,10 @@ class PlayerController {
         // 设置玩家位置
         const newPosition = this.tempVector.copy(this.tempSegment.start).applyMatrix4(this.collider!.matrixWorld);
         const deltaVector = this.tempVector2.subVectors(newPosition, this.player.position);
-
         // 应用位移
-        const len = deltaVector.length();
-        const offset = Math.max(0, len - 1e-5);
-        if (offset > 0 && len > 0) {
-            const n = deltaVector.multiplyScalar(1 / len);
-            this.player.position.addScaledVector(n, offset);
-        }
+        const offset = Math.max(0, deltaVector.length() - 1e-5);
+        deltaVector.normalize().multiplyScalar(offset);
+        this.player.position.add(deltaVector);
 
         // 第三人称-朝向
         if (!this.isFirstPerson && this.moveDir.lengthSq() > 0) {
@@ -595,20 +578,18 @@ class PlayerController {
                 this.camera.position.lerp(targetCamPos, this._camCollisionLerp); // 平滑移动相机到targetCamPos
             } else {
                 // 相机恢复
-                const dis = this.player.position.distanceTo(this.camera.position); // 计算当前人物到相机距离
+                // const dis = this.player.position.distanceTo(this.camera.position); // 计算当前人物到相机距离
                 this._raycasterPersonToCam.far = this._maxCamDistance;
                 // 检查预设相机位置是否有遮挡
                 const intersectsMaxDis = this._raycasterPersonToCam.intersectObject(this.collider as THREE.Object3D, false);
-                // 距离小于最大距离且没有遮挡 恢复相机
-                if (dis < this._maxCamDistance) {
-                    let safeDist = this._maxCamDistance;
-                    if (intersectsMaxDis.length) {
-                        const hitMax = intersectsMaxDis[0]; // 找到第一个命中
-                        safeDist = hitMax.distance - this._camEpsilon;
-                    }
-                    const targetCamPos = origin.clone().add(direction.clone().multiplyScalar(safeDist));
-                    this.camera.position.lerp(targetCamPos, this._camCollisionLerp);
+                // 恢复相机
+                let safeDist = this._maxCamDistance;
+                if (intersectsMaxDis.length) {
+                    const hitMax = intersectsMaxDis[0]; // 找到第一个命中
+                    safeDist = hitMax.distance - this._camEpsilon;
                 }
+                const targetCamPos = origin.clone().add(direction.clone().multiplyScalar(safeDist));
+                this.camera.position.lerp(targetCamPos, this._camCollisionLerp);
             }
         }
 
@@ -712,19 +693,21 @@ class PlayerController {
                 this.setAnimationByPressed();
                 break;
             case "Space":
-                if (!this.spacePressed) this.spacePressed = true;
-                if (!this.spaceLongPressTimer) {
-                    this.spaceLongPressTimer = setTimeout(() => {
-                        this.sustainSpacePressed = true;
-                    }, 2000);
-                }
+                if (!this.playerIsOnGround || this.isFlying) return;
+                this.spacePressed = true;
+                this.playPersonAnimationByName("jumping");
+                this.playerVelocity.y = this.jumpHeight;
+                this.playerIsOnGround = false;
                 break;
             case "ControlLeft":
                 this.ctPressed = true;
                 break;
-
             case "KeyV":
                 this.changeView();
+                break;
+            case "KeyF":
+                this.isFlying = !this.isFlying;
+                this.setAnimationByPressed();
                 break;
         }
     };
@@ -753,13 +736,7 @@ class PlayerController {
                 this.setAnimationByPressed();
                 break;
             case "Space":
-                // 清除定时器
-                if (this.spaceLongPressTimer) {
-                    clearTimeout(this.spaceLongPressTimer);
-                    this.spaceLongPressTimer = null;
-                }
-                this.spacePressed = false;
-                this.sustainSpacePressed = false;
+                // this.spacePressed = false;
                 break;
             case "ControlLeft":
                 this.ctPressed = false;
@@ -769,6 +746,17 @@ class PlayerController {
 
     // 根据按键设置人物动画
     setAnimationByPressed = () => {
+        this._maxCamDistance = 440 * this.playerModel.scale;
+        if (this.isFlying) {
+            if (!this.fwdPressed) {
+                this.playPersonAnimationByName("flyidle");
+                return;
+            }
+            this.playPersonAnimationByName("flying");
+            this._maxCamDistance = 700 * this.playerModel.scale;
+            return;
+        }
+
         if (this.playerIsOnGround) {
             if (!this.fwdPressed && !this.bkdPressed && !this.lftPressed && !this.rgtPressed) {
                 this.playPersonAnimationByName("idle");
@@ -804,6 +792,8 @@ class PlayerController {
                 this.playPersonAnimationByName("walking_backward");
                 return;
             }
+        } else {
+            this.playPersonAnimationByName("jumping");
         }
     };
 
@@ -850,7 +840,6 @@ class PlayerController {
     // 更新模型动画
     private updateMixers(delta: number) {
         if (this.personMixer) this.personMixer.update(delta);
-        if (this.droneMixer) this.droneMixer.update(delta);
     }
 
     // BVH构建
@@ -999,10 +988,11 @@ export function playerController() {
                     leftWalkAnim?: string;
                     rightWalkAnim?: string;
                     backwardAnim?: string;
+                    flyAnim?: string;
+                    flyIdleAnim?: string;
                     scale: number;
                     gravity?: number;
                     jumpHeight?: number;
-                    highJumpHeight?: number;
                     speed?: number;
                 };
                 initPos?: THREE.Vector3;

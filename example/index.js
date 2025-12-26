@@ -62,10 +62,12 @@ async function init() {
         playerModel: {
             url: "./glb/person.glb",
             scale: 0.001,
-            idleAnim: "Idle_2",
-            walkAnim: "Walking_11",
-            runAnim: "Running_9",
-            jumpAnim: "Jump_3",
+            idleAnim: "idle",
+            walkAnim: "walk",
+            runAnim: "run",
+            jumpAnim: "jump",
+            flyAnim: "flying",
+            flyIdleAnim: "flyidle",
         },
         initPos: pos,
     });

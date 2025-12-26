@@ -14,6 +14,10 @@ npm install three-player-controller
 
 ![Controls](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
 
+### fly
+
+![fly](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/3.gif)
+
 ### Third-person camera obstacle avoidance
 
 ![Third-person camera obstacle avoidance](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
@@ -23,6 +27,8 @@ npm install three-player-controller
 ```js
 import * as THREE from "three";
 import { playerController } from "three-player-controller";
+
+const player = playerController();
 
 // Initialize the player controller
 player.init({

@@ -14,15 +14,22 @@ npm install three-player-controller
 
 ![控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
 
+### 飞行
+
+![飞行](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/3.gif)
+
 ### 第三人称相机避障
 
 ![第三人称相机避障](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
+
 
 # 使用
 
 ```js
 import * as THREE from "three";
 import { playerController } from "three-player-controller";
+
+const player = playerController();
 
 // 初始化玩家控制器
 player.init({
