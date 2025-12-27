@@ -1,28 +1,29 @@
 # three-player-controller
 
-A lightweight third-person / first-person player controller, ready to use out of the box, based on three.js and three-mesh-bvh. It implements capsule-based character collision, BVH collision detection, character animations, first/third-person switching, and camera obstacle avoidance. This repository contains the library source code and example demos.
+轻量的第三人称 / 第一人称玩家控制器，开箱即用，基于 three.js 和 three-mesh-bvh 实现人物胶囊体碰撞、BVH 碰撞检测、人物动画、第一/三人称切换与相机避障。此仓库包含库源码、example 演示。
 
-# Installation
+# 安装
 
 npm install three-player-controller
 
-# Demo
+# 示例
 
 [Player Controller](https://hh-hang.github.io/three-player-controller/)
 
-### Controls
+### 控制
 
-![Controls](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
+![控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/1.gif)
 
-### fly
+### 飞行
 
-![fly](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/3.gif)
+![飞行](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/3.gif)
 
-### Third-person camera obstacle avoidance
+### 第三人称相机避障
 
-![Third-person camera obstacle avoidance](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
+![第三人称相机避障](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
 
-# Usage
+
+# 使用
 
 ```js
 import * as THREE from "three";
@@ -30,27 +31,27 @@ import { playerController } from "three-player-controller";
 
 const player = playerController();
 
-// Initialize the player controller
+// 初始化玩家控制器
 player.init({
-  scene, // three.js scene
-  camera, // three.js camera
-  controls, // three.js controls
+  scene, // three.js 场景
+  camera, // three.js 相机
+  controls, // three.js 控制器
   playerModel: {
-    url: "./glb/person.glb", // model path
-    scale: 0.001, // model scale
-    idleAnim: "Idle_2", // idle animation name
-    walkAnim: "Walking_11", // walk animation name
-    runAnim: "Running_9", // run animation name
-    jumpAnim: "Jump_3", // jump animation name
+    url: "./glb/person.glb", // 模型路径
+    scale: 0.001, // 模型缩放
+    idleAnim: "Idle_2", // 默认 Idle 动画名字
+    walkAnim: "Walking_11", // 默认 Walk 动画名字
+    runAnim: "Running_9", // 默认 Run 动画名字
+    jumpAnim: "Jump_3", // 默认 Jump 动画名字
   },
-  initPos: pos, // initial position
+  initPos: pos, // 初始位置
 });
 
-// Call in the render loop
+// 渲染循环调用
 player.update();
 ```
 
-# Thanks
+# 感谢
 
 [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh)
 
