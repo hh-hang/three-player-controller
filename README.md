@@ -18,9 +18,9 @@ npm install three-player-controller
 
 ![飞行](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/3.gif)
 
-### 第三人称相机避障
+### 3DTiles 漫游
 
-![第三人称相机避障](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/2.gif)
+![3DTiles 漫游](https://github.com/hh-hang/three-player-controller/blob/master/example/public/gif/4.gif)
 
 
 # 使用
