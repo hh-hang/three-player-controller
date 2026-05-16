@@ -596,7 +596,6 @@ export class playerController {
 
         const v = this.vehicle;
         if (v.isMovingToBoarding) v.updateMoveTo(delta);
-        if (!this.isFlying) this.playerCapsule.position.addScaledVector(this.playerVelocity, delta);
 
         // 上车关门计时
         if (v.isBoardingAnim) {
