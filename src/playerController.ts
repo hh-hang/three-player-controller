@@ -674,20 +674,29 @@ export class playerController {
                 const capsuleInfo = this.playerCapsule.capsuleInfo;
                 const snapH = parseFloat((-capsuleInfo.segment.end.y + capsuleInfo.radius).toFixed(6));
                 const maxH = parseFloat((snapH * 1.2).toFixed(6));
+                const snapY = bestHit.point.y + snapH;
                 const dist = parseFloat((this.playerCapsule.position.y - bestHit.point.y).toFixed(6));
                 if (dist > maxH) {
-                    // console.log('应用重力');
                     this.applyGravity(delta);
-                } else {
-                    if (this.playerVelocity.y <= 0) {
-                        // console.log('吸附到地面');
-                        this.snapToGround(bestHit.point.y + snapH);
+                } else if (this.playerVelocity.y <= 0) {
+                    if (this.playerIsOnGround) {
+                        // 已在地面：直接跟随地形（斜坡、动态平台）
+                        this.snapToGround(snapY);
+                    } else {
+                        // 从空中落下：只有本帧速度能到达落点才 snap，否则继续应用重力
+                        const predictedY = this.playerCapsule.position.y + this.playerVelocity.y * delta;
+                        if (predictedY <= snapY) {
+                            this.snapToGround(snapY);
+                        } else {
+                            this.applyGravity(delta);
+                        }
                     }
                 }
             } else {
-                // console.log('应用重力');
                 this.applyGravity(delta);
             }
+            // 应用重力速度叠加
+            this.playerCapsule.position.addScaledVector(this.playerVelocity, delta);
         }
 
         // 分步碰撞移动
@@ -836,14 +845,13 @@ export class playerController {
     // 应用重力
     private applyGravity(delta: number) {
         this.playerVelocity.y += delta * this.gravity;
-        this.playerCapsule.position.addScaledVector(this.playerVelocity, delta);
         this.setOnGround(false);
     }
 
     // 吸附到地面
     private snapToGround(groundY: number) {
         this.playerVelocity.set(0, 0, 0);
-        this.playerCapsule.position.y = THREE.MathUtils.lerp(this.playerCapsule.position.y, groundY, 0.5);
+        this.playerCapsule.position.y = groundY;
         this.setOnGround(true);
     }
 
