@@ -39,9 +39,13 @@ export type FootIKPlayer = {
         point: Vector3;
         /** 命中面的世界空间单位法线。 */
         normal: Vector3;
+        /** 动态刚体及其视觉变换；预测线路使用其局部空间保存落点。 */
+        body?: { mesh: Object3D };
     } | null;
     /** 当前站立的动态刚体；站在球体上时 Foot IK 会忽略该支撑。 */
     getActiveDynamicBody?: () => { kind: FootIKIgnoredDynamicKind } | null;
+    /** 返回角色当前世界空间速度；预测落脚启用时用于补充胶囊实际位移速度。 */
+    getVelocity?: () => Vector3;
     /** 角色移动系统本帧最终采用的支撑点；可来自射线或体积探测。 */
     getGroundSupport?: () => {
         /** 控制器实际用于贴地的世界空间支撑点。 */
@@ -166,6 +170,54 @@ export type FootIKOptions = {
     footPhaseMinContactRatio?: number;
     /** 支撑脚水平速度过滤倍率，默认 1.35。 */
     footPhaseSpeedSlack?: number;
+    /** 是否启用预测落脚；默认 false，关闭时完全沿用反应式 Foot IK。 */
+    predictivePlacement?: boolean;
+    /** 最长预测时间，单位为秒，默认 0.45。 */
+    predictionHorizon?: number;
+    /** 预测地面候选重新探测间隔，单位为秒，默认 0.05。 */
+    predictionProbeInterval?: number;
+    /** 预测落脚候选相对动画落点的搜索半径基准值（按 scale 缩放），默认 20。 */
+    predictionSearchRadius?: number;
+    /** 允许预测目标偏离动画落点的最大水平距离基准值（按 scale 缩放），默认 45。 */
+    maxPredictionCorrection?: number;
+    /** 预测落脚允许的最小地面法线 Y 分量，默认 0.55。 */
+    predictionMinNormalY?: number;
+    /** 候选落脚面至少需要命中的脚底采样点数量，范围 1 到 4，默认 3。 */
+    predictionMinSupportSamples?: number;
+    /** 摆动轨迹的基础净空基准值（按 scale 缩放），大步幅和上台阶时会额外增加，默认 8。 */
+    swingClearance?: number;
+};
+
+/** 预测落脚运行时状态。 */
+export type PredictiveFootMode = "none" | "tracking" | "committed";
+
+/** 单只脚的预测目标、支撑面和平台锚点。 */
+export type PredictiveFootState = {
+    mode: PredictiveFootMode;
+    landingTarget: Vector3;
+    landingNormal: Vector3;
+    supportPoint: Vector3;
+    animatedLanding: Vector3;
+    animatedLandingRotation: Quaternion;
+    trajectoryStart: Vector3;
+    trajectoryCurrentTarget: Vector3;
+    trajectoryRootForward: Vector3;
+    trajectoryStartProgress: number;
+    trajectoryClearance: number;
+    supportObject: Object3D | null;
+    supportLocalTarget: Vector3;
+    supportLocalPoint: Vector3;
+    supportLocalNormal: Vector3;
+    probeElapsed: number;
+    score: number;
+    debugTrajectory: Vector3[];
+    debugTrajectoryVisible: boolean;
+    debugCandidates: Array<{
+        point: Vector3;
+        evaluated: boolean;
+        valid: boolean;
+        selected: boolean;
+    }>;
 };
 
 // 单个地面探测采样点的运行时数据。
@@ -210,12 +262,15 @@ export type FootIKLeg = {
     weight: number;
     plantedWeight: number;
     planted: boolean;
+    predictive: PredictiveFootState;
     lastPole: Vector3;
     hasLastPole: boolean;
     marker: Mesh | null;
     hitMarker: Mesh | null;
     rayLine: Line | null;
     raiseLimitLine: LineSegments | null;
+    predictiveLine: Line | null;
+    predictiveCandidateMarkers: Mesh[];
 };
 
 // 已完成必要骨骼绑定的腿链。
@@ -248,6 +303,14 @@ export type FootPhaseRuntimeState = {
     planted: boolean;
     progress: number;
     timeToLand: number;
+    nextLanding: FootPhaseLanding | null;
+};
+
+/** 动画周期内一次落脚事件及其模型局部脚骨位姿。 */
+export type FootPhaseLanding = {
+    phase: number;
+    localPosition: Vector3;
+    localRotation: Quaternion;
 };
 
 // 左右脚在当前动画帧的相位状态。
@@ -264,6 +327,7 @@ export type FootPhaseSideData = {
     contacts: boolean[];
     land: number[];
     lift: number[];
+    landings: FootPhaseLanding[];
 };
 
 // 单个移动动画的左右脚相位数据。
@@ -277,11 +341,13 @@ export type FootPhaseClipData = {
 // 以动画名称索引的脚步相位数据库。
 export type FootPhaseDatabase = Map<string, FootPhaseClipData>;
 
-// 单只脚在某个采样帧的世界空间位置。
+// 单只脚在某个采样帧的接触高度和模型局部脚骨位姿。
 export type FootPhaseSamplePoint = {
     y: number;
     x: number;
+    localY: number;
     z: number;
+    localRotation: Quaternion;
 };
 
 // 左右脚在动画采样时刻的位置数据。

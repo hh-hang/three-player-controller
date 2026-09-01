@@ -44,9 +44,25 @@ const DEBUG_HIT_OVER_RAISE_LIMIT_COLOR = 0xff3333;
 const DEBUG_RAISE_LIMIT_COLOR = 0x60a5fa;
 /** 命中超出最大上抬范围时的线框颜色。 */
 const DEBUG_RAISE_LIMIT_EXCEEDED_COLOR = 0xff3333;
+/** 预测目标仍在持续跟踪时的颜色。 */
+const DEBUG_PREDICTIVE_TRACKING_COLOR = 0x38bdf8;
+/** 预测目标已提交、不再切换候选时的颜色。 */
+const DEBUG_PREDICTIVE_COMMITTED_COLOR = 0xf59e0b;
+/** 可用但未被选中的预测候选颜色。 */
+const DEBUG_PREDICTIVE_VALID_COLOR = 0xfde047;
+/** 无法提供完整鞋底支撑的预测候选颜色。 */
+const DEBUG_PREDICTIVE_INVALID_COLOR = 0xef4444;
+/** 设计尺度下的预测候选球半径。 */
+const PREDICTIVE_CANDIDATE_RADIUS = 2;
 /** 每条腿的上抬范围由四条竖线和顶部四边组成。 */
 const RAISE_LIMIT_POINTS = Array.from({ length: 16 }, () => new Vector3());
 const SOLE_PERIMETER = [0, 1, 3, 2] as const;
+
+/** 返回当前预测落脚状态对应的调试颜色。 */
+function getPredictiveModeColor(leg: FootIKLeg): number {
+    if (leg.predictive.mode === "committed") return DEBUG_PREDICTIVE_COMMITTED_COLOR;
+    return DEBUG_PREDICTIVE_TRACKING_COLOR;
+}
 
 function setHitMarkerColor(mesh: Mesh, overRaiseLimit: boolean): void {
     const material = mesh.material;
@@ -61,7 +77,9 @@ function setIKMarkerColor(mesh: Mesh, leg: FootIKLeg, applied: boolean): void {
     if (Array.isArray(material)) return;
 
     let color = DEBUG_IK_NOT_APPLIED_COLOR;
-    if (applied) {
+    if (leg.predictive.mode !== "none" && Number.isFinite(leg.predictive.score)) {
+        color = getPredictiveModeColor(leg);
+    } else if (applied) {
         if (leg.planted) color = DEBUG_IK_PLANTED_COLOR;
         else if (leg.movePenetrating) color = DEBUG_IK_PENETRATION_COLOR;
         else color = DEBUG_IK_PLANTED_COLOR;
@@ -81,6 +99,7 @@ export function createDebugObjects(
     let hitGeometry: SphereGeometry | null = null;
     let sampleOriginGeometry: SphereGeometry | null = null;
     let sampleHitGeometry: SphereGeometry | null = null;
+    let predictiveCandidateGeometry: SphereGeometry | null = null;
 
     for (const side of FOOT_IK_SIDES) {
         const leg = legs[side];
@@ -146,6 +165,43 @@ export function createDebugObjects(
             leg.raiseLimitLine.renderOrder = 24;
             leg.raiseLimitLine.frustumCulled = false;
             scene.add(leg.raiseLimitLine);
+        }
+
+        if (!leg.predictiveLine) {
+            leg.predictiveLine = new Line(
+                new BufferGeometry().setFromPoints(leg.predictive.debugTrajectory),
+                new LineBasicMaterial({
+                    color: DEBUG_PREDICTIVE_TRACKING_COLOR,
+                    depthTest: false,
+                    transparent: true,
+                    opacity: 0.95,
+                }),
+            );
+            leg.predictiveLine.visible = false;
+            leg.predictiveLine.renderOrder = 32;
+            leg.predictiveLine.frustumCulled = false;
+            scene.add(leg.predictiveLine);
+        }
+
+        if (leg.predictiveCandidateMarkers.length === 0) {
+            predictiveCandidateGeometry ??= new SphereGeometry(PREDICTIVE_CANDIDATE_RADIUS, 10, 8);
+            for (const _candidate of leg.predictive.debugCandidates) {
+                const marker = new Mesh(
+                    predictiveCandidateGeometry,
+                    new MeshBasicMaterial({
+                        color: DEBUG_PREDICTIVE_INVALID_COLOR,
+                        wireframe: true,
+                        depthTest: false,
+                        transparent: true,
+                        opacity: 0.9,
+                    }),
+                );
+                marker.visible = false;
+                marker.renderOrder = 31;
+                marker.frustumCulled = false;
+                leg.predictiveCandidateMarkers.push(marker);
+                scene.add(marker);
+            }
         }
 
         for (const sample of leg.soleSamples) {
@@ -236,6 +292,7 @@ export function updateFootDebug(
     }
 
     updateRaiseLimitLine(leg, maxFootRaise);
+    updatePredictiveDebug(leg, s);
 
     // 脚底四点：原点 + 命中 + 射线
     for (const sample of leg.soleSamples) {
@@ -264,6 +321,45 @@ export function updateFootDebug(
     }
 }
 
+/** 更新预测摆动轨迹、五个候选点及其状态配色。 */
+function updatePredictiveDebug(leg: FootIKLeg, scale: number): void {
+    const state = leg.predictive;
+    const showTrajectory = state.mode === "committed";
+    const showCandidates = state.mode === "tracking";
+
+    if (leg.predictiveLine) {
+        leg.predictiveLine.visible = showTrajectory && state.debugTrajectoryVisible;
+        if (leg.predictiveLine.visible) {
+            leg.predictiveLine.geometry.setFromPoints(state.debugTrajectory);
+            const material = leg.predictiveLine.material;
+            if (!Array.isArray(material)) {
+                (material as LineBasicMaterial).color.setHex(getPredictiveModeColor(leg));
+            }
+        }
+    }
+
+    for (let i = 0; i < leg.predictiveCandidateMarkers.length; i++) {
+        const marker = leg.predictiveCandidateMarkers[i];
+        const candidate = state.debugCandidates[i];
+        marker.visible = showCandidates && !!candidate?.evaluated;
+        if (!marker.visible || !candidate) continue;
+
+        marker.position.copy(candidate.point);
+        marker.scale.setScalar(scale * (candidate.selected ? 1.25 : 0.8));
+        const material = marker.material;
+        if (Array.isArray(material)) continue;
+        const debugMaterial = material as MeshBasicMaterial;
+        debugMaterial.wireframe = !candidate.selected;
+        debugMaterial.color.setHex(
+            candidate.selected
+                ? getPredictiveModeColor(leg)
+                : candidate.valid
+                    ? DEBUG_PREDICTIVE_VALID_COLOR
+                    : DEBUG_PREDICTIVE_INVALID_COLOR,
+        );
+    }
+}
+
 // 统一切换所有 Foot IK 调试对象的显隐。
 export function setDebugVisible(legs: FootIKLegs, visible: boolean): void {
     for (const side of FOOT_IK_SIDES) {
@@ -272,6 +368,17 @@ export function setDebugVisible(legs: FootIKLegs, visible: boolean): void {
         if (leg.hitMarker) leg.hitMarker.visible = visible;
         if (leg.rayLine) leg.rayLine.visible = visible && leg.weight > 0.001;
         if (leg.raiseLimitLine) leg.raiseLimitLine.visible = visible;
+        if (leg.predictiveLine) {
+            leg.predictiveLine.visible = visible
+                && leg.predictive.debugTrajectoryVisible
+                && leg.predictive.mode === "committed";
+        }
+        for (let i = 0; i < leg.predictiveCandidateMarkers.length; i++) {
+            const candidate = leg.predictive.debugCandidates[i];
+            leg.predictiveCandidateMarkers[i].visible = visible
+                && !!candidate?.evaluated
+                && leg.predictive.mode === "tracking";
+        }
         for (const sample of leg.soleSamples) {
             if (sample.footMarker) sample.footMarker.visible = visible;
             if (sample.marker) sample.marker.visible = visible && sample.hasHit;
@@ -309,10 +416,16 @@ export function disposeDebugObjects(legs: FootIKLegs): void {
         collectDebugObject(leg.hitMarker, geometries, materials);
         collectDebugObject(leg.rayLine, geometries, materials);
         collectDebugObject(leg.raiseLimitLine, geometries, materials);
+        collectDebugObject(leg.predictiveLine, geometries, materials);
+        for (const marker of leg.predictiveCandidateMarkers) {
+            collectDebugObject(marker, geometries, materials);
+        }
         leg.marker = null;
         leg.hitMarker = null;
         leg.rayLine = null;
         leg.raiseLimitLine = null;
+        leg.predictiveLine = null;
+        leg.predictiveCandidateMarkers.length = 0;
 
         for (const sample of leg.soleSamples) {
             collectDebugObject(sample.marker, geometries, materials);

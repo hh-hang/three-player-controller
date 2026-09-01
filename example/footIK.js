@@ -211,12 +211,15 @@ function createDebugPanel() {
         sunDebug: false,
         footIKEnabled: footIKOptions.enabled ?? true,
         footIKDebug: footIKOptions.debug ?? false,
+        predictivePlacement: footIKOptions.predictivePlacement ?? false,
         leftFootPhase: "",
         leftFootLand: "--",
         leftFootIKWeight: 0,
+        leftPrediction: "disabled",
         rightFootPhase: "",
         rightFootLand: "--",
         rightFootIKWeight: 0,
+        rightPrediction: "disabled",
         maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 50, 0),
         maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
@@ -269,14 +272,19 @@ function createDebugPanel() {
     footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
         footIK?.setDebugEnabled(value && params.footIKEnabled);
     });
+    footIKFolder.add(params, "predictivePlacement").name("Predictive Placement").onChange((value) => {
+        footIK?.configure({ predictivePlacement: value });
+    });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
     footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "leftPrediction").name("Left Prediction").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "rightPrediction").name("Right Prediction").listen().disable();
     footIKRuntimeFolder.close();
 
     const pelvisFolder = footIKFolder.addFolder("Pelvis");
@@ -509,9 +517,11 @@ function updateFootIKDebugPanel() {
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
     footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
+    footIKDebugParams.leftPrediction = footIK.getPredictiveFootDebugText("left");
     footIKDebugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
     footIKDebugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
     footIKDebugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+    footIKDebugParams.rightPrediction = footIK.getPredictiveFootDebugText("right");
 }
 
 function formatFootLandTime(value) {

@@ -6,6 +6,7 @@ import type {
     FootIKSkeletonConfig,
     ReadyFootIKLeg,
 } from "../types";
+import { createPredictiveFootState } from "./predictivePlacement";
 
 // 收集模型层级下的全部骨骼。
 export function collectBones(root: Object3D | null | undefined): Bone[] {
@@ -74,6 +75,7 @@ export function createLeg(
         weight: 0,
         plantedWeight: 0,
         planted: false,
+        predictive: createPredictiveFootState(),
 
         // 上一帧 pole 只在弯曲平面退化时使用。
         lastPole: new Vector3(),
@@ -83,6 +85,8 @@ export function createLeg(
         hitMarker: null,
         rayLine: null,
         raiseLimitLine: null,
+        predictiveLine: null,
+        predictiveCandidateMarkers: [],
     };
 }
 
