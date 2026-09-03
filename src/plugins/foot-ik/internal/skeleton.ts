@@ -87,6 +87,8 @@ export function createLeg(
         raiseLimitLine: null,
         predictiveLine: null,
         predictiveCandidateMarkers: [],
+        predictiveSupportMesh: null,
+        predictiveSupportOutline: null,
     };
 }
 

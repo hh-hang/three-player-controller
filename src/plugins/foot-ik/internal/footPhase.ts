@@ -17,6 +17,7 @@ import type {
     FootPhaseFrameSample,
     FootPhaseLanding,
     FootPhaseOptions,
+    FootPhasePoseSample,
     FootPhaseRuntime,
     FootPhaseRuntimeState,
     FootPhaseSamplePoint,
@@ -177,6 +178,32 @@ function getFootPhaseSample(model: Object3D, leg: ReadyFootIKLeg): FootPhaseSamp
     };
 }
 
+// 按循环相位插值离线动画中的脚骨局部位姿。
+export function sampleFootPhasePose(
+    sideData: FootPhaseSideData,
+    normalizedTime: number,
+    position: Vector3,
+    rotation: Quaternion,
+): boolean {
+    const poses = sideData.poses;
+    if (poses.length === 0) return false;
+
+    const wrappedTime = ((normalizedTime % 1) + 1) % 1;
+    const sample = wrappedTime * poses.length;
+    const fromIndex = Math.floor(sample) % poses.length;
+    const toIndex = (fromIndex + 1) % poses.length;
+    const alpha = sample - Math.floor(sample);
+    position.lerpVectors(
+        poses[fromIndex].localPosition,
+        poses[toIndex].localPosition,
+        alpha,
+    );
+    rotation
+        .copy(poses[fromIndex].localRotation)
+        .slerp(poses[toIndex].localRotation, alpha);
+    return true;
+}
+
 // 分析单只脚的落地相位。
 function analyzeFootPhaseSide(
     samples: readonly FootPhaseFrameSample[],
@@ -193,6 +220,13 @@ function analyzeFootPhaseSide(
     const land: number[] = [];
     const lift: number[] = [];
     const landings: FootPhaseLanding[] = [];
+    const poses: FootPhasePoseSample[] = samples.map(sample => {
+        const point = sample[side];
+        return {
+            localPosition: new Vector3(point.x, point.localY, point.z),
+            localRotation: point.localRotation.clone(),
+        };
+    });
 
     for (let i = 0; i < contacts.length; i++) {
         const prev = contacts[(i - 1 + contacts.length) % contacts.length];
@@ -214,6 +248,7 @@ function analyzeFootPhaseSide(
         land,
         lift,
         landings,
+        poses,
     };
 }
 

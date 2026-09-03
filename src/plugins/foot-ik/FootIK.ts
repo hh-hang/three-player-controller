@@ -6,6 +6,7 @@ import {
     Vector3,
     type Bone,
     type Intersection,
+    type Mesh,
     type Object3D,
 } from "three";
 import { createTwoBoneIKScratch, solveTwoBoneIK } from "./internal/twoBoneIK";
@@ -30,11 +31,29 @@ import {
     disposeDebugObjects,
 } from "./internal/debug";
 import {
+    createPredictiveScratch,
+    findPredictiveFootCandidates,
+    getPredictiveDemandThresholds,
+    getPredictivePlaneDistance,
+    getPredictiveTerrainDemand,
+    acceptPredictiveFootCandidate,
+    refreshPredictiveSupportAnchor,
     resetPredictiveFootState,
-    samplePredictiveTrajectory,
+    selectPredictiveDebugCandidate,
+    shiftPredictiveDebugTrajectory,
+    type PredictiveScratch,
 } from "./internal/predictivePlacement";
+import {
+    getPredictiveClearanceShape,
+    getPredictiveLocalProgress,
+    planPredictiveFootTrajectory,
+    PREDICTION_ROTATION_WARP_START,
+    type PredictiveTrajectoryContext,
+    type PredictiveTrajectoryPlan,
+} from "./internal/predictiveTrajectory";
 import type {
     FootIKBonePose,
+    FootIKGroundHit,
     FootIKLeg,
     FootIKLegs,
     FootIKOptions,
@@ -45,33 +64,35 @@ import type {
     FootPhaseDatabase,
     FootPhaseOptions,
     FootPhaseRuntimeState,
+    PredictiveFootState,
     ReadyFootIKLeg,
 } from "./types";
 import type { TwoBoneIKScratch } from "./internal/twoBoneIK";
 
-// 脚底查询统一使用世界空间命中点和法线。
-type FootIKGroundHit = {
-    point: Vector3;
-    normal: Vector3;
-    object?: Object3D;
-};
-
-// 预测候选保留脚骨目标、实际支撑面和评分，用于生成本次摆动线路。
-type PredictiveFootCandidate = {
-    target: Vector3;
-    point: Vector3;
-    normal: Vector3;
-    object: Object3D | null;
-    score: number;
-    debugIndex: number;
-};
-
 /** Foot IK 不参与地面检测的动态刚体形状。 */
 const FOOT_IK_IGNORED_DYNAMIC_KINDS = ["sphere"] as const;
-/** 水平步幅转换为额外摆动净空的比例。 */
-const PREDICTION_STRIDE_CLEARANCE_SCALE = 0.15;
-/** 已提交线路允许角色继续转向的最大角度，超过后从当前目标连续重规划。 */
-const PREDICTION_TURN_REPLAN_COS = Math.cos(MathUtils.degToRad(25));
+/** 摆腿进入末段后锁定地形结果，避免落地前继续切换支撑面。 */
+const PREDICTION_LOCK_PROGRESS = 0.88;
+/** 预测线路启用后达到该局部进度时完成位置 IK 渐入。 */
+const PREDICTION_IK_BLEND_END = 0.35;
+/** 支撑落点残差在新摆腿前段完成释放的相位比例。 */
+const PREDICTION_RELEASE_PROGRESS = 0.25;
+/** 反应式 IK 追目标和渐出的阻尼系数。 */
+const REACTIVE_IK_DAMP = 40;
+
+function createGroundHit(): FootIKGroundHit {
+    return {
+        point: new Vector3(),
+        normal: new Vector3(0, 1, 0),
+    };
+}
+
+function copyGroundHit(source: FootIKGroundHit, target: FootIKGroundHit): FootIKGroundHit {
+    target.point.copy(source.point);
+    target.normal.copy(source.normal);
+    target.object = source.object;
+    return target;
+}
 
 /** 根据角色动画和地面高度修正脚部姿态的控制器插件。 */
 export class FootIK {
@@ -105,15 +126,15 @@ export class FootIK {
     private pelvisRaiseEpsilon = 4;
     private pelvisRaiseMinNormalY = 0.98;
     private pelvisRaiseWeightThreshold = 0.8;
-    // 预测落脚开关与搜索、提交和摆动修正配置。
+    // 预测落脚开关与搜索、线路和摆动修正配置。
     private predictivePlacement: boolean;
     private predictionHorizon: number;
     private predictionProbeInterval: number;
     private predictionSearchRadius = 20;
     private maxPredictionCorrection = 45;
     private predictionMinNormalY: number;
-    private predictionMinSupportSamples: number;
     private swingClearance = 8;
+    private maxPredictionClearance = 50;
     // 当前距离字段已烘焙进去的 scale；改 scale 时按 ratio 连乘。
     private appliedScale = 1;
 
@@ -127,6 +148,22 @@ export class FootIK {
     private pelvisOffset = 0;
 
     // 地面检测与每帧复用的临时对象。
+    private colliderMeshes: Mesh[] = [];
+    private readonly groundHit = createGroundHit();
+    private readonly capsuleHit = createGroundHit();
+    private readonly bestGroundHit = createGroundHit();
+    private readonly sampleGroundHits = [
+        createGroundHit(),
+        createGroundHit(),
+        createGroundHit(),
+        createGroundHit(),
+    ];
+    private readonly sampleGroundHitSlots: Array<FootIKGroundHit | null> = [
+        null,
+        null,
+        null,
+        null,
+    ];
     private readonly raycaster: Raycaster;
     private readonly up = new Vector3(0, 1, 0);
     private readonly tmpV1 = new Vector3();
@@ -153,6 +190,8 @@ export class FootIK {
     private readonly normalMatrix = new Matrix3();
     // 双骨骼 IK 解算器跨帧复用的临时对象。
     private readonly twoBoneIKScratch: TwoBoneIKScratch;
+    // 预测落脚搜索和轨迹规划使用的专用临时对象。
+    private readonly predictiveScratch: PredictiveScratch;
 
     // 胶囊实际位移速度比输入速度更能反映碰撞后的真实运动，用于预测未来根节点位置。
     private readonly previousCapsulePosition = new Vector3();
@@ -194,17 +233,16 @@ export class FootIK {
         this.predictionSearchRadius = Math.max(0, options.predictionSearchRadius ?? this.predictionSearchRadius);
         this.maxPredictionCorrection = Math.max(0, options.maxPredictionCorrection ?? this.maxPredictionCorrection);
         this.swingClearance = Math.max(0, options.swingClearance ?? this.swingClearance);
+        this.maxPredictionClearance = Math.max(
+            0,
+            options.maxPredictionClearance ?? this.maxFootRaise,
+        );
 
         // 预测落脚默认关闭，确保未显式开启时不改变既有 Foot IK 行为。
         this.predictivePlacement = options.predictivePlacement ?? false;
         this.predictionHorizon = Math.max(0, options.predictionHorizon ?? 0.45);
         this.predictionProbeInterval = Math.max(0, options.predictionProbeInterval ?? 0.05);
         this.predictionMinNormalY = MathUtils.clamp(options.predictionMinNormalY ?? 0.55, 0, 1);
-        this.predictionMinSupportSamples = MathUtils.clamp(
-            Math.round(options.predictionMinSupportSamples ?? 3),
-            1,
-            4,
-        );
         this.footAlignWeight = MathUtils.clamp(options.footAlignWeight ?? 1, 0, 1); // 脚掌贴合地面法线的强度
         this.maxFootTilt = MathUtils.clamp(options.maxFootTilt ?? Math.PI / 2, 0, Math.PI); // 脚掌贴坡最大旋转角
         const configuredMinBend = MathUtils.clamp(options.minKneeBend ?? MathUtils.degToRad(2), 0, Math.PI);
@@ -234,6 +272,7 @@ export class FootIK {
         };
 
         this.twoBoneIKScratch = createTwoBoneIKScratch();
+        this.predictiveScratch = createPredictiveScratch();
 
         // 未传配置时才回退到启发式匹配。
         this.skeletonConfig = options.skeleton ?? null; // 骨骼绑定配置，支持骨骼名或 Bone 对象
@@ -343,6 +382,7 @@ export class FootIK {
         this.predictionSearchRadius *= ratio;
         this.maxPredictionCorrection *= ratio;
         this.swingClearance *= ratio;
+        this.maxPredictionClearance *= ratio;
         this.pelvisOffset *= ratio;
         this.raycaster.far = this.raycastFar;
         this.footPhaseOptions.groundThreshold = this.footPhaseGroundThreshold;
@@ -448,14 +488,17 @@ export class FootIK {
         if (!this.enabled || this.disposed) return;
         this.updateFootPhaseRuntime();
         if (this.predictivePlacement) this.updatePredictionVelocity(delta);
+        this.refreshColliderMeshes();
 
+        const player = this.player;
         // 不在地面、飞行或载具模式时不做腿部贴地
         if (
-            (!this.player?.getColliderMeshes().length && !this.player?.getDynamicBodies?.().length)
-            || !this.player.playerCapsule
-            || !this.player.playerIsOnGround
-            || this.player.isFlying
-            || this.player.getControllerMode?.() === 1
+            !player
+            || (!this.colliderMeshes.length && !player.getDynamicBodies?.().length)
+            || !player.playerCapsule
+            || !player.playerIsOnGround
+            || player.isFlying
+            || player.getControllerMode?.() === 1
         ) {
             if (this.predictivePlacement) {
                 resetPredictiveFootState(this.legs.left.predictive);
@@ -465,7 +508,7 @@ export class FootIK {
             return;
         }
 
-        const model = this.player.playerModel;
+        const model = player.playerModel;
         model?.updateMatrixWorld(true);
 
         // moving 决定移动与静止 IK 策略：移动使用脚步相位和稳定直弯 pole，静止保留动画 pole。
@@ -581,28 +624,19 @@ export class FootIK {
             resetPredictiveFootState(leg.predictive);
         }
 
-        // 已生成线路的摆动脚直接逐帧执行预测目标，不再进入原有防穿透分支。
-        if (!leg.planted && this.applyPredictiveSwingFoot(leg, footWorld, phase)) return;
+        // 改变水平落点的预测结果在支撑阶段继续使用原落点，避免切回动画时跳变。
+        if (leg.planted && this.resolvePredictivePlantedFoot(leg, footWorld, delta)) return;
+
+        // 统一融合后的预测摆动脚不再进入原有防穿透分支。
+        if (!leg.planted && this.resolvePredictiveSwingFoot(leg, footWorld, phase)) return;
+        // 偏移落点留下的支撑残差在新摆腿前段连续归还给动画。
+        if (!leg.planted && this.resolvePredictiveReleaseFoot(leg, footWorld)) return;
 
         const hit = this.castBestFootGround(leg);
 
-        // 脚底没有命中地面时，本帧完全交还给原动画。
+        // 脚底没有命中地面时，把已有反应式修正按时间渐出。
         if (!hit) {
-            if (!leg.planted) {
-                this.releaseSwingFoot(
-                    leg,
-                    footWorld,
-                    startedSwing || wasMovePenetrating,
-                    previousWeight,
-                    delta,
-                );
-                this.updateFootDebug(leg, footWorld);
-                return;
-            }
-            leg.plantedWeight = 0;
-            leg.movePenetrating = false;
-            leg.weight = 0;
-            leg.offsetY = 0;
+            this.fadeReactiveFoot(leg, footWorld, delta);
             this.updateFootDebug(leg, footWorld);
             return;
         }
@@ -613,37 +647,18 @@ export class FootIK {
         const groundOffset = this.getFootGroundOffset(leg);
         const liftAmount = Math.max(0, groundOffset);
         const pelvisTargetOffset = this.getAlignedFootTargetOffset(leg, footWorld);
-        // 支撑脚下探超过最大范围时，本帧交还给原动画。
+        // 支撑脚下探超过最大范围时，把已有反应式修正按时间渐出。
         if (leg.planted && pelvisTargetOffset < -this.maxFootDrop) {
-            leg.weight = 0;
-            leg.plantedWeight = 0;
-            leg.offsetY = 0;
-            leg.movePenetrating = false;
-            leg.smoothedTarget.copy(footWorld);
+            this.fadeReactiveFoot(leg, footWorld, delta);
             this.updateFootDebug(leg, hit.point);
             return;
         }
         const targetOffset = leg.planted
             ? pelvisTargetOffset
             : Math.max(0, pelvisTargetOffset);
-        // 命中面超过脚部最大上抬范围时，本帧交还给原动画。
+        // 命中面超过脚部最大上抬范围时，把已有反应式修正按时间渐出。
         if (targetOffset > this.maxFootRaise) {
-            if (!leg.planted) {
-                this.releaseSwingFoot(
-                    leg,
-                    footWorld,
-                    startedSwing || wasMovePenetrating,
-                    previousWeight,
-                    delta,
-                );
-                this.updateFootDebug(leg, hit.point);
-                return;
-            }
-            leg.weight = 0;
-            leg.plantedWeight = 0;
-            leg.offsetY = 0;
-            leg.movePenetrating = false;
-            leg.smoothedTarget.copy(footWorld);
+            this.fadeReactiveFoot(leg, footWorld, delta);
             this.updateFootDebug(leg, hit.point);
             return;
         }
@@ -657,9 +672,7 @@ export class FootIK {
                 .addScaledVector(this.up, pelvisTargetOffset);
         }
 
-        // 支撑脚允许在限制范围内双向贴地；摆动脚只在穿透时上抬。
-        // 支撑状态和防穿透独立触发：任意相位陷入地面都会立即抬起。
-        // 防穿透只负责上抬，不参与脚步锁定状态。
+        // 支撑脚双向贴地；摆动脚只在穿透时上抬。权重和高度都按时间阻尼，不瞬切。
         leg.movePenetrating = liftAmount > this.moveLiftThreshold;
 
         const wantedPlantedWeight = leg.planted ? 1 : 0;
@@ -670,58 +683,85 @@ export class FootIK {
             leg.plantedWeight = MathUtils.damp(
                 leg.plantedWeight ?? 0,
                 wantedPlantedWeight,
-                10,
+                REACTIVE_IK_DAMP,
                 delta,
             );
         }
+        if (leg.plantedWeight < 0.001) leg.plantedWeight = 0;
 
-        // 支撑状态短时间渐入/渐出；穿透修正仍然立即介入，避免脚陷入地面。
-        if (leg.movePenetrating) {
-            leg.weight = 1;
-        } else if (leg.plantedWeight > 0.001) {
-            leg.weight = leg.plantedWeight;
-        } else {
-            // 移动 swing 脚听原动画，IK 不生效。
-            leg.weight = 0;
-        }
-
-        // 支撑脚直接使用当前目标；摆动脚保留上一帧修正并渐出，防穿透仍立即覆盖上抬量。
-        if (leg.planted) {
-            leg.offsetY = targetOffset;
-        } else if (leg.movePenetrating) {
-            leg.offsetY = targetOffset;
-        } else if (!startedSwing) {
-            leg.offsetY = MathUtils.damp(leg.offsetY, 0, 10, delta);
-            if (Math.abs(leg.offsetY) < this.snapEpsilon) leg.offsetY = 0;
-        }
-        leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
+        const wantedWeight = (leg.planted || leg.movePenetrating) ? 1 : 0;
+        const wantedAppliedOffset = (leg.planted || leg.movePenetrating)
+            ? targetOffset
+            : 0;
+        this.dampReactiveOffset(
+            leg,
+            footWorld,
+            wantedAppliedOffset,
+            wantedWeight,
+            delta,
+        );
 
         this.updateFootDebug(leg, hit.point);
     }
 
-    // 摆动阶段命中失效时继续释放已有支撑修正，避免无命中分支把权重和目标直接清零。
-    private releaseSwingFoot(
+    /** 反应式 IK 按时间追世界高度和权重；不应用时目标回到当前动画脚。 */
+    private dampReactiveOffset(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
-        inheritOutputWeight: boolean,
-        previousWeight: number,
+        wantedOffset: number,
+        wantedWeight: number,
         delta: number,
     ): void {
-        leg.movePenetrating = false;
-        leg.plantedWeight = inheritOutputWeight
-            ? previousWeight
-            : MathUtils.damp(leg.plantedWeight, 0, 10, delta);
-        if (leg.plantedWeight < 0.001) leg.plantedWeight = 0;
-        leg.weight = leg.plantedWeight;
-
-        if (!inheritOutputWeight) {
-            leg.offsetY = MathUtils.damp(leg.offsetY, 0, 10, delta);
-            if (Math.abs(leg.offsetY) < this.snapEpsilon) leg.offsetY = 0;
+        const footAlongUp = footWorld.dot(this.up);
+        const wantedAlongUp = footAlongUp + wantedOffset;
+        // 已有输出时沿用上一帧世界高度；尚未应用时从当前动画脚开始。
+        const hasPrevious = leg.weight > 0.001
+            || Math.abs(leg.offsetY) > this.snapEpsilon;
+        const previousAlongUp = hasPrevious
+            ? leg.smoothedTarget.dot(this.up)
+            : footAlongUp;
+        let dampedAlongUp = MathUtils.damp(
+            previousAlongUp,
+            wantedAlongUp,
+            REACTIVE_IK_DAMP,
+            delta,
+        );
+        if (Math.abs(dampedAlongUp - wantedAlongUp) < this.snapEpsilon) {
+            dampedAlongUp = wantedAlongUp;
         }
+        leg.offsetY = dampedAlongUp - footAlongUp;
+
+        leg.weight = MathUtils.damp(
+            leg.weight,
+            wantedWeight,
+            REACTIVE_IK_DAMP,
+            delta,
+        );
+        if (leg.weight < 0.001) leg.weight = 0;
+
+        // XZ 跟当前动画脚，高度走上面阻尼后的世界值。
         leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
     }
 
-    /** 在摆动开始时生成一次预测线路，并在落地后恢复原有支撑脚逻辑。 */
+    /** 反应式 IK 不再应用时，把权重和高度修正按时间还给动画。 */
+    private fadeReactiveFoot(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+        delta: number,
+    ): void {
+        leg.movePenetrating = false;
+        leg.hasPelvisTarget = false;
+        leg.plantedWeight = MathUtils.damp(
+            leg.plantedWeight,
+            0,
+            REACTIVE_IK_DAMP,
+            delta,
+        );
+        if (leg.plantedWeight < 0.001) leg.plantedWeight = 0;
+        this.dampReactiveOffset(leg, footWorld, 0, 0, delta);
+    }
+
+    /** 摆动期间持续更新预测线路，并在末段锁定最终落脚结果。 */
     private updatePredictiveFoot(
         leg: ReadyFootIKLeg,
         phase: FootPhaseRuntimeState | undefined,
@@ -731,15 +771,38 @@ export class FootIK {
     ): void {
         const state = leg.predictive;
 
-        // 支撑阶段不保留预测状态，继续使用原有 Foot IK 的贴地和权重逻辑。
+        // 偏移落点进入支撑后转为 planted 锚点；中心落点则交还给普通贴地 IK。
         if (leg.planted) {
-            if (state.mode !== "none") resetPredictiveFootState(state);
+            if (state.mode === "active" && state.usesOffsetLanding) {
+                state.mode = "planted";
+                state.predictionWeight = 1;
+                state.debugTrajectoryVisible = false;
+            } else if (state.mode !== "planted" && state.mode !== "none") {
+                resetPredictiveFootState(state);
+            }
             return;
         }
 
         if (startedSwing) {
+            // 上一支撑若改过水平落点，把残差带到新摆腿前段再还给动画。
+            const preserveRelease = state.mode === "planted"
+                && state.usesOffsetLanding;
+            if (preserveRelease) {
+                this.tmpV1.subVectors(
+                    state.trajectoryCurrentTarget,
+                    footWorld,
+                );
+            }
             resetPredictiveFootState(state);
             state.mode = "tracking";
+            if (
+                preserveRelease
+                && this.tmpV1.lengthSq() > this.snapEpsilon * this.snapEpsilon
+            ) {
+                state.releaseOffset.copy(this.tmpV1);
+                state.releaseStartProgress = phase?.progress ?? 0;
+                state.releaseActive = true;
+            }
         }
 
         if (!phase?.nextLanding || !Number.isFinite(phase.timeToLand)) {
@@ -752,8 +815,14 @@ export class FootIK {
             state.mode = "tracking";
         }
 
+        state.trajectoryProgress = Math.max(
+            state.trajectoryProgress,
+            phase.progress,
+        );
+
         const model = this.player?.playerModel;
         if (!model) return;
+        // 用剩余落地时间和当前胶囊速度，把动画落点推到预计踩实时的世界位置。
         const predictionTime = Math.min(phase.timeToLand, this.predictionHorizon);
         state.animatedLanding
             .copy(phase.nextLanding.localPosition)
@@ -763,372 +832,518 @@ export class FootIK {
             .copy(model.getWorldQuaternion(this.tmpQ4))
             .multiply(phase.nextLanding.localRotation);
 
-        const replanningTurn = state.mode === "committed"
-            && this.shouldReplanPredictiveTurn(leg);
-        if (state.mode === "committed" && !replanningTurn) return;
+        // 动画中心落点始终跟随当前预测结果，落地时水平修正自然收敛为零。
+        if (state.mode === "active" && !state.usesOffsetLanding) {
+            this.followAnimatedLandingTarget(leg);
+        }
+
+        // 摆腿末段锁定支撑面，避免落地前一帧换到另一级台阶。
+        if (state.trajectoryProgress >= PREDICTION_LOCK_PROGRESS) {
+            return;
+        }
 
         state.probeElapsed += delta;
+        // 射线按探测间隔更新，间隔内继续用上一份落点和当前动画脚解目标。
         if (state.probeElapsed >= this.predictionProbeInterval) {
             state.probeElapsed = 0;
-            const candidate = this.findPredictiveFootCandidate(
+            const ctx = this.getPredictiveContext(model);
+            const { candidate, centerSupport } = findPredictiveFootCandidates(
+                ctx,
                 leg,
                 phase,
                 state.animatedLanding,
                 state.animatedLandingRotation,
             );
-            if (candidate) {
-                // 首次搜索从动画脚起步；转向重规划从上一帧预测目标起步，避免线路接管跳变。
-                this.acceptPredictiveFootCandidate(leg, candidate);
-                this.commitPredictiveFootTrajectory(
-                    leg,
-                    replanningTurn ? state.trajectoryCurrentTarget : footWorld,
-                    phase.progress,
+            if (!centerSupport) {
+                this.suppressFlatPredictiveFoot(leg);
+                return;
+            }
+
+            const trajectoryStart = state.mode === "active"
+                ? state.trajectoryCurrentTarget
+                : state.releaseActive
+                    ? this.predictiveScratch.trajectoryStart
+                        .copy(footWorld)
+                        .addScaledVector(
+                            state.releaseOffset,
+                            this.getPredictiveReleaseWeight(state),
+                        )
+                    : footWorld;
+            const trajectoryStartProgress = state.mode === "active"
+                ? state.trajectoryStartProgress
+                : state.trajectoryProgress;
+
+            const { enter: demandEnter, exit: demandExit } =
+                getPredictiveDemandThresholds(
+                    this.appliedScale,
+                    this.snapEpsilon,
+                    this.predictiveScratch,
                 );
-            }
-        }
-    }
+            // 已激活时用更低的退出阈值，减少台阶边缘反复进出预测。
+            const demandThreshold = state.mode === "active"
+                ? demandExit
+                : demandEnter;
 
-    /** 判断角色朝向是否已经明显偏离当前预测线路提交时的方向。 */
-    private shouldReplanPredictiveTurn(leg: ReadyFootIKLeg): boolean {
-        const capsule = this.player?.playerCapsule;
-        if (!capsule || leg.predictive.trajectoryRootForward.lengthSq() < 1e-8) return false;
-
-        const currentForward = this.tmpV1
-            .set(0, 0, 1)
-            .applyQuaternion(capsule.getWorldQuaternion(this.tmpQ4))
-            .setY(0)
-            .normalize();
-        return currentForward.dot(leg.predictive.trajectoryRootForward)
-            < PREDICTION_TURN_REPLAN_COS;
-    }
-
-    /** 在预测动画落点周围搜索中心、前后和左右五个候选落脚点。 */
-    private findPredictiveFootCandidate(
-        leg: ReadyFootIKLeg,
-        phase: FootPhaseRuntimeState,
-        expected: Vector3,
-        expectedRotation: Quaternion,
-    ): PredictiveFootCandidate | null {
-        const capsule = this.player?.playerCapsule;
-        if (!capsule) return null;
-
-        const forward = this.tmpV1.copy(this.predictionVelocity).setY(0);
-        if (forward.lengthSq() < 1e-8) {
-            forward
-                .set(0, 0, 1)
-                .applyQuaternion(capsule.getWorldQuaternion(this.tmpQ4))
-                .setY(0);
-        }
-        forward.normalize();
-        const side = this.tmpV2.crossVectors(forward, this.up).normalize();
-        const futureRootDelta = this.tmpV8
-            .copy(this.predictionVelocity)
-            .multiplyScalar(Math.min(phase.timeToLand, this.predictionHorizon));
-
-        let best: PredictiveFootCandidate | null = null;
-        let debugIndex = 0;
-        for (const candidate of leg.predictive.debugCandidates) {
-            candidate.evaluated = false;
-            candidate.valid = false;
-            candidate.selected = false;
-        }
-        // 单个入口按顺序评估五个位置，避免为候选中心额外分配数组。
-        const evaluate = (offsetX: number, offsetZ: number): void => {
-            const currentDebugIndex = debugIndex++;
-            const debugCandidate = leg.predictive.debugCandidates[currentDebugIndex];
-            debugCandidate.evaluated = true;
-            debugCandidate.point.set(
-                expected.x + offsetX,
-                expected.y,
-                expected.z + offsetZ,
-            );
-            const candidate = this.evaluatePredictiveFootCandidate(
-                leg,
-                expected.x + offsetX,
-                expected.z + offsetZ,
-                expected,
-                expectedRotation,
-                futureRootDelta,
-            );
             if (candidate) {
-                candidate.debugIndex = currentDebugIndex;
-                debugCandidate.valid = true;
-                debugCandidate.point.copy(candidate.target);
+                const plan = planPredictiveFootTrajectory(
+                    ctx,
+                    leg,
+                    phase,
+                    footWorld,
+                    trajectoryStart,
+                    trajectoryStartProgress,
+                    candidate,
+                );
+                const planeLift = getPredictivePlaneDistance(ctx, candidate);
+                const swingLift = plan?.terrainDemand ?? 0;
+                state.debugPlaneLift = planeLift;
+                state.debugSwingLift = swingLift;
+                const terrainDemand = getPredictiveTerrainDemand(
+                    planeLift,
+                    swingLift,
+                );
+
+                // 落点上台和摆腿途中凸起都不够高时，保持动画和反应式 IK。
+                if (terrainDemand < demandThreshold) {
+                    this.suppressFlatPredictiveFoot(leg);
+                    return;
+                }
+
+                if (!plan) {
+                    state.debugCandidates[0].valid = false;
+                    this.suppressFlatPredictiveFoot(leg);
+                    return;
+                }
+
+                acceptPredictiveFootCandidate(
+                    state,
+                    candidate,
+                    this.predictiveScratch,
+                );
+                selectPredictiveDebugCandidate(state, 0);
+                plan.terrainDemand = terrainDemand;
+                this.updatePredictiveFootTrajectory(
+                    leg,
+                    footWorld,
+                    trajectoryStart,
+                    state.trajectoryProgress,
+                    plan,
+                    demandExit,
+                    demandEnter,
+                );
+                return;
             }
-            if (candidate && (!best || candidate.score < best.score)) best = candidate;
-        };
 
-        evaluate(0, 0);
-        evaluate(forward.x * this.predictionSearchRadius, forward.z * this.predictionSearchRadius);
-        evaluate(-forward.x * this.predictionSearchRadius, -forward.z * this.predictionSearchRadius);
-        evaluate(side.x * this.predictionSearchRadius, side.z * this.predictionSearchRadius);
-        evaluate(-side.x * this.predictionSearchRadius, -side.z * this.predictionSearchRadius);
-        const selected = best as PredictiveFootCandidate | null;
-        if (selected) leg.predictive.debugCandidates[selected.debugIndex].selected = true;
-        return selected;
+            // 鞋底可站但脚骨目标未通过抬降/腿长约束时，不启用预测线路。
+            const planeLift = getPredictivePlaneDistance(ctx, centerSupport);
+            state.debugPlaneLift = planeLift;
+            state.debugSwingLift = 0;
+            this.suppressFlatPredictiveFoot(leg);
+        }
     }
 
-    /** 使用脚底四点支撑、坡度、修正距离和腿长约束评估单个预测候选。 */
-    private evaluatePredictiveFootCandidate(
-        leg: ReadyFootIKLeg,
-        centerX: number,
-        centerZ: number,
-        expected: Vector3,
-        expectedRotation: Quaternion,
-        futureRootDelta: Vector3,
-    ): PredictiveFootCandidate | null {
-        // 终点鞋底必须使用动画落地帧旋转，不能沿用当前摆动帧的脚尖下压姿态。
-        const footWorldQ = expectedRotation;
-        // worldScale 必须避开 castGroundFrom 使用的法线临时向量，保证四次探测期间保持不变。
-        const worldScale = leg.foot.getWorldScale(this.tmpV9);
-        const hits: FootIKGroundHit[] = [];
-        let highestHit: FootIKGroundHit | null = null;
-
-        // 先按动画脚旋转展开四个鞋底点，再从预测高度上方向下查询候选支撑面。
-        for (const sample of leg.soleSamples) {
-            const relative = this.tmpV4
-                .copy(sample.local)
-                .multiply(worldScale)
-                .applyQuaternion(footWorldQ);
-            const hit = this.castGroundFrom(
-                centerX + relative.x,
-                expected.y + this.sampleRayOriginY,
-                centerZ + relative.z,
-            );
-            if (!hit) continue;
-            hits.push(hit);
-            if (!highestHit || hit.point.y > highestHit.point.y) highestHit = hit;
-        }
-        if (!highestHit) return null;
-
-        // 只合并最高命中所在的近似共面点，避免跨台阶平均出不存在的斜面。
-        const planeEpsilon = Math.max(1e-6, 2 * this.appliedScale);
-        const supportPoint = new Vector3();
-        const supportNormal = new Vector3();
-        let supportCount = 0;
-        for (const hit of hits) {
-            const planeDistance = Math.abs(
-                highestHit.normal.dot(this.tmpV5.copy(hit.point).sub(highestHit.point)),
-            );
-            if (planeDistance > planeEpsilon || hit.normal.dot(highestHit.normal) < 0.95) continue;
-            supportPoint.add(hit.point);
-            supportNormal.add(hit.normal);
-            supportCount++;
-        }
-        if (supportCount < this.predictionMinSupportSamples) return null;
-        supportPoint.multiplyScalar(1 / supportCount);
-        supportNormal.normalize();
-        if (supportNormal.y < this.predictionMinNormalY) return null;
-
-        const correctionSq = (centerX - expected.x) ** 2 + (centerZ - expected.z) ** 2;
-        const maxCorrectionSq = this.maxPredictionCorrection * this.maxPredictionCorrection;
-        if (correctionSq > maxCorrectionSq) return null;
-
-        // 按最终坡面旋转虚拟鞋底，反算四个角都不穿透时所需的脚骨世界高度。
-        const alignQ = this.tmpQ2.setFromUnitVectors(this.up, supportNormal);
-        const realAngle = 2 * Math.acos(MathUtils.clamp(alignQ.w, -1, 1));
-        if (realAngle > this.maxFootTilt) {
-            alignQ.slerp(this.identityQ, 1 - this.maxFootTilt / realAngle);
-        }
-        alignQ.slerp(this.identityQ, 1 - this.footAlignWeight);
-        const targetWorldQ = alignQ.multiply(footWorldQ);
-
-        let targetY = -Infinity;
-        for (const sample of leg.soleSamples) {
-            const relative = this.tmpV4
-                .copy(sample.local)
-                .multiply(worldScale)
-                .applyQuaternion(targetWorldQ);
-            const sampleX = centerX + relative.x;
-            const sampleZ = centerZ + relative.z;
-            const planeY = supportPoint.y - (
-                supportNormal.x * (sampleX - supportPoint.x)
-                + supportNormal.z * (sampleZ - supportPoint.z)
-            ) / supportNormal.y;
-            targetY = Math.max(targetY, planeY - relative.y);
-        }
-        if (!Number.isFinite(targetY)) return null;
-
-        const target = new Vector3(centerX, targetY, centerZ);
-        const heightDelta = targetY - expected.y;
-        if (heightDelta > this.maxFootRaise || heightDelta < -this.maxFootDrop) return null;
-
-        const hip = leg.upper.getWorldPosition(this.tmpV5);
-        const knee = leg.lower.getWorldPosition(this.tmpV6);
-        const foot = leg.foot.getWorldPosition(this.tmpV7);
-        const upperLen = hip.distanceTo(knee);
-        const lowerLen = knee.distanceTo(foot);
-        // 候选落点按保留 pelvisKneeBend 的安全腿长过滤，避免只满足完全伸直时的理论距离。
-        const maxReach = Math.sqrt(
-            upperLen * upperLen
-            + lowerLen * lowerLen
-            + 2 * upperLen * lowerLen * Math.cos(this.pelvisKneeBend),
-        );
-        hip.add(futureRootDelta);
-        const reachRatio = maxReach > 1e-6 ? hip.distanceTo(target) / maxReach : Infinity;
-        if (reachRatio > 1) return null;
-
-        const correctionRatio = this.maxPredictionCorrection > 1e-6
-            ? Math.sqrt(correctionSq) / this.maxPredictionCorrection
-            : 0;
-        const heightRange = Math.max(this.maxFootRaise, this.maxFootDrop, 1e-6);
-        const score = correctionRatio
-            + (1 - supportNormal.y) * 0.7
-            + Math.abs(heightDelta) / heightRange * 0.4
-            + (4 - supportCount) * 2
-            + Math.max(0, reachRatio - 0.85) / 0.2 * 3;
-
+    /** 组装预测候选搜索和轨迹规划共用的配置与回调。 */
+    private getPredictiveContext(model: Object3D): PredictiveTrajectoryContext {
         return {
-            target,
-            point: supportPoint,
-            normal: supportNormal,
-            object: highestHit.object ?? null,
-            score,
-            debugIndex: -1,
+            up: this.up,
+            appliedScale: this.appliedScale,
+            snapEpsilon: this.snapEpsilon,
+            sampleRayOriginY: this.sampleRayOriginY,
+            maxPredictionCorrection: this.maxPredictionCorrection,
+            predictionMinNormalY: this.predictionMinNormalY,
+            maxFootRaise: this.maxFootRaise,
+            maxFootDrop: this.maxFootDrop,
+            pelvisKneeBend: this.pelvisKneeBend,
+            footAlignWeight: this.footAlignWeight,
+            predictionHorizon: this.predictionHorizon,
+            predictionVelocity: this.predictionVelocity,
+            scratch: this.predictiveScratch,
+            debug: this.debug,
+            castGroundFrom: (x, y, z) => this.castGroundFrom(x, y, z),
+            castCapsuleGround: () => this.castCapsuleGround(),
+            getConstrainedFootAlign: (normal, alignWeight, target) =>
+                this.getConstrainedFootAlign(normal, alignWeight, target),
+            mergeCoplanarHits: (hits, highest, supportPoint, supportNormal) =>
+                this.mergeCoplanarGroundHits(hits, highest, supportPoint, supportNormal),
+            getSafeLegReach: (upperLen, lowerLen, kneeBend) =>
+                this.getSafeLegReach(upperLen, lowerLen, kneeBend),
+            model,
+            footPhaseClips: this.footPhaseClips,
+            clipName: this.footPhaseState.clipName,
+            normalizedTime: this.footPhaseState.normalizedTime,
+            swingClearance: this.swingClearance,
+            maxPredictionClearance: this.maxPredictionClearance,
         };
     }
 
-    /** 冻结本次摆动的起点和落点，使后续位置 IK 与调试线共用同一条轨迹。 */
-    private commitPredictiveFootTrajectory(
+    // 地形需求退出阈值后立即交还动画和普通 Foot IK。
+    private suppressFlatPredictiveFoot(leg: ReadyFootIKLeg): void {
+        const state = leg.predictive;
+        state.mode = "tracking";
+        state.score = Infinity;
+        state.supportObject = null;
+        state.trajectoryStartOffset.set(0, 0, 0);
+        state.trajectoryCurrentTarget.set(0, 0, 0);
+        state.trajectoryStartProgress = state.trajectoryProgress;
+        state.trajectoryClearance = 0;
+        state.predictionWeight = 0;
+        state.usesOffsetLanding = false;
+        state.debugTrajectoryVisible = false;
+    }
+
+    /** 更新预测线路，并保持重规划首帧的世界空间目标连续。 */
+    private updatePredictiveFootTrajectory(
         leg: ReadyFootIKLeg,
-        footWorld: Vector3,
+        animationFoot: Vector3,
+        trajectoryStart: Vector3,
         progress: number,
+        plan: PredictiveTrajectoryPlan,
+        demandExit: number,
+        demandEnter: number,
     ): void {
         const state = leg.predictive;
-        state.mode = "committed";
-        state.trajectoryStart.copy(footWorld);
-        state.trajectoryCurrentTarget.copy(footWorld);
-        state.trajectoryStartProgress = MathUtils.clamp(progress, 0, 1);
+        const wasActive = state.mode === "active";
 
-        // 平地保留基础净空，并按水平步幅和上台阶高度增加弧高。
-        const stepUp = Math.max(0, state.landingTarget.y - footWorld.y);
-        const horizontalStride = Math.hypot(
-            state.landingTarget.x - footWorld.x,
-            state.landingTarget.z - footWorld.z,
+        if (!wasActive) {
+            state.mode = "active";
+            // 记下启用瞬间脚相对动画的偏移，后续按剩余摆腿把这份残差渐隐掉。
+            state.trajectoryStartOffset.subVectors(
+                trajectoryStart,
+                animationFoot,
+            );
+            state.trajectoryCurrentTarget.copy(trajectoryStart);
+            state.trajectoryStartProgress = MathUtils.clamp(progress, 0, 1);
+        } else {
+            const localProgress = getPredictiveLocalProgress(
+                progress,
+                state.trajectoryStartProgress,
+            );
+            const warpAlpha = MathUtils.smoothstep(localProgress, 0, 1);
+            const remainingStartWeight = 1 - warpAlpha;
+            if (remainingStartWeight > 1e-4) {
+                const landingCorrection = this.tmpV1.subVectors(
+                    state.landingTarget,
+                    state.animatedLanding,
+                );
+                // 用当前输出反推起点残差，使重规划后这一帧的世界目标不变。
+                const resolvedWithoutStart = this.tmpV2
+                    .copy(animationFoot)
+                    .addScaledVector(landingCorrection, warpAlpha)
+                    .addScaledVector(
+                        this.up,
+                        plan.clearance
+                            * getPredictiveClearanceShape(localProgress),
+                    );
+                state.trajectoryStartOffset
+                    .subVectors(
+                        state.trajectoryCurrentTarget,
+                        resolvedWithoutStart,
+                    )
+                    .multiplyScalar(1 / remainingStartWeight);
+            } else {
+                state.trajectoryStartOffset.set(0, 0, 0);
+            }
+        }
+
+        state.trajectoryClearance = plan.clearance;
+        // 需求刚过退出阈值时权重接近 0，接近进入阈值时才满权。
+        state.predictionWeight = MathUtils.smoothstep(
+            plan.terrainDemand,
+            demandExit,
+            demandEnter,
         );
-        state.trajectoryClearance = Math.min(
-            this.maxFootRaise,
-            this.swingClearance
-                + horizontalStride * PREDICTION_STRIDE_CLEARANCE_SCALE
-                + stepUp * 0.35,
-        );
-        const capsule = this.player?.playerCapsule;
-        if (capsule) {
-            state.trajectoryRootForward
-                .set(0, 0, 1)
-                .applyQuaternion(capsule.getWorldQuaternion(this.tmpQ4))
-                .setY(0)
-                .normalize();
+        if (this.debug) {
+            for (let i = 0; i < state.debugTrajectory.length; i++) {
+                state.debugTrajectory[i].copy(plan.points[i]);
+            }
         }
         this.rebuildPredictiveDebugTrajectory(leg);
     }
 
-    /** 使用权威摆动轨迹重建调试折线；移动平台只会通过锚点更新终点。 */
+    /** 根据当前融合状态刷新预测摆动轨迹的调试可见性。 */
     private rebuildPredictiveDebugTrajectory(leg: ReadyFootIKLeg): void {
         const state = leg.predictive;
         state.debugTrajectoryVisible = this.debug
             && Number.isFinite(state.score)
-            && state.mode === "committed";
-        if (!state.debugTrajectoryVisible) return;
+            && state.mode === "active"
+            && state.predictionWeight > 0.001;
+    }
 
-        const points = state.debugTrajectory;
-        for (let i = 0; i < points.length; i++) {
-            const t = i / (points.length - 1);
-            // 与 IK 目标调用同一个采样函数，保证画出的线路就是脚实际追踪的线路。
-            samplePredictiveTrajectory(
-                state.trajectoryStart,
-                state.landingTarget,
-                state.trajectoryClearance,
-                t,
-                points[i],
+    /** 让动画中心落点持续跟随实际落地帧，并保持当前支撑平面的高度关系。 */
+    private followAnimatedLandingTarget(leg: ReadyFootIKLeg): void {
+        const state = leg.predictive;
+        const previousTarget = this.debug
+            ? this.tmpV1.copy(state.landingTarget)
+            : null;
+        const deltaX = state.animatedLanding.x - state.landingTarget.x;
+        const deltaZ = state.animatedLanding.z - state.landingTarget.z;
+        state.landingTarget.x = state.animatedLanding.x;
+        state.landingTarget.z = state.animatedLanding.z;
+        // 水平跟着动画走时，沿支撑平面改 Y，避免脚骨离开已探测的地面。
+        if (state.landingNormal.y > 0.18) {
+            state.landingTarget.y -= (
+                state.landingNormal.x * deltaX
+                + state.landingNormal.z * deltaZ
+            ) / state.landingNormal.y;
+        }
+
+        if (previousTarget) {
+            shiftPredictiveDebugTrajectory(
+                state.debugTrajectory,
+                this.tmpV2.subVectors(state.landingTarget, previousTarget),
             );
         }
     }
 
-    /** 保存首次有效预测候选，并把目标转换为命中平台的局部锚点。 */
-    private acceptPredictiveFootCandidate(
-        leg: ReadyFootIKLeg,
-        candidate: PredictiveFootCandidate,
-    ): void {
-        const state = leg.predictive;
-        state.landingTarget.copy(candidate.target);
-        state.supportPoint.copy(candidate.point);
-        state.landingNormal.copy(candidate.normal);
-        state.score = candidate.score;
-        state.supportObject = candidate.object;
-
-        if (state.supportObject) {
-            state.supportObject.updateMatrixWorld(true);
-            state.supportLocalTarget.copy(state.landingTarget);
-            state.supportObject.worldToLocal(state.supportLocalTarget);
-            state.supportLocalPoint.copy(state.supportPoint);
-            state.supportObject.worldToLocal(state.supportLocalPoint);
-            // 法线使用逆法线矩阵转回局部空间，平台旋转后可重新生成正确世界法线。
-            this.normalMatrix.getNormalMatrix(state.supportObject.matrixWorld).invert();
-            state.supportLocalNormal
-                .copy(state.landingNormal)
-                .applyMatrix3(this.normalMatrix)
-                .normalize();
-        }
-    }
-
-    /** 根据已保存的平台局部锚点刷新预测目标、支撑点和世界法线。 */
-    private refreshPredictiveSupportAnchor(leg: ReadyFootIKLeg): void {
-        const state = leg.predictive;
-        if (!state.supportObject) return;
-
-        state.supportObject.updateMatrixWorld(true);
-        state.landingTarget.copy(state.supportLocalTarget);
-        state.supportObject.localToWorld(state.landingTarget);
-        state.supportPoint.copy(state.supportLocalPoint);
-        state.supportObject.localToWorld(state.supportPoint);
-        this.normalMatrix.getNormalMatrix(state.supportObject.matrixWorld);
-        state.landingNormal
-            .copy(state.supportLocalNormal)
-            .applyMatrix3(this.normalMatrix)
-            .normalize();
-    }
-
-    /** 从已提交的权威轨迹采样摆动目标，使实际 IK 与调试线路保持一致。 */
-    private applyPredictiveSwingFoot(
+    /** 支撑阶段沿用发生水平修正的预测落点，直到下一次摆腿开始。 */
+    private resolvePredictivePlantedFoot(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
-        phase: FootPhaseRuntimeState | undefined,
+        delta: number,
     ): boolean {
-        if (!this.predictivePlacement || !phase || leg.planted) return false;
         const state = leg.predictive;
-        if (state.mode !== "committed" || !Number.isFinite(state.score)) return false;
-        this.refreshPredictiveSupportAnchor(leg);
-        this.rebuildPredictiveDebugTrajectory(leg);
+        if (state.mode !== "planted" || !state.usesOffsetLanding) return false;
 
-        const remainingProgress = Math.max(1e-6, 1 - state.trajectoryStartProgress);
-        const trajectoryProgress = MathUtils.clamp(
-            (phase.progress - state.trajectoryStartProgress)
-                / remainingProgress,
-            0,
-            1,
-        );
-        samplePredictiveTrajectory(
-            state.trajectoryStart,
-            state.landingTarget,
-            state.trajectoryClearance,
-            trajectoryProgress,
-            leg.smoothedTarget,
-        );
+        refreshPredictiveSupportAnchor(leg, this.predictiveScratch, this.debug);
+        leg.smoothedTarget.copy(state.landingTarget);
+        // 骨盆使用未裁剪落点，与普通 Foot IK 一样先按可达性下拉/上抬，再限制脚目标。
+        leg.hasPelvisTarget = true;
+        leg.pelvisTarget.copy(leg.smoothedTarget);
         this.clampPredictiveTargetToReach(leg, leg.smoothedTarget);
         state.trajectoryCurrentTarget.copy(leg.smoothedTarget);
-
-        // 预测线路替代摆动脚原有的防穿透目标，每帧都以完整权重执行位置 IK。
-        leg.movePenetrating = false;
-        leg.plantedWeight = 0;
-        leg.weight = 1;
-        leg.offsetY = leg.smoothedTarget.y - footWorld.y;
         leg.hitPoint.copy(state.supportPoint);
         leg.hitNormal.copy(state.landingNormal);
         leg.supportPoint.copy(state.supportPoint);
         leg.supportNormal.copy(state.landingNormal);
+        leg.movePenetrating = false;
+        leg.plantedWeight = MathUtils.damp(
+            Math.max(leg.plantedWeight, leg.weight),
+            1,
+            10,
+            delta,
+        );
+        leg.weight = leg.plantedWeight;
+        leg.offsetY = leg.smoothedTarget.y - footWorld.y;
         this.updateFootDebug(leg, state.supportPoint);
         return true;
+    }
+
+    // 返回支撑残差在当前摆腿相位中尚未释放的权重。
+    private getPredictiveReleaseWeight(state: PredictiveFootState): number {
+        if (!state.releaseActive) return 0;
+        const localProgress = getPredictiveLocalProgress(
+            state.trajectoryProgress,
+            state.releaseStartProgress,
+        );
+        return 1 - MathUtils.smoothstep(
+            localProgress,
+            0,
+            PREDICTION_RELEASE_PROGRESS,
+        );
+    }
+
+    /** 在新摆腿前段逐渐释放上一支撑落点相对动画脚的残差。 */
+    private resolvePredictiveReleaseFoot(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+    ): boolean {
+        const state = leg.predictive;
+        const releaseWeight = this.getPredictiveReleaseWeight(state);
+        if (releaseWeight <= 0.001) {
+            state.releaseOffset.set(0, 0, 0);
+            state.releaseActive = false;
+            return false;
+        }
+
+        leg.smoothedTarget
+            .copy(footWorld)
+            .addScaledVector(state.releaseOffset, releaseWeight);
+        leg.hasPelvisTarget = true;
+        leg.pelvisTarget.copy(leg.smoothedTarget);
+        this.clampPredictiveTargetToReach(leg, leg.smoothedTarget);
+        state.trajectoryCurrentTarget.copy(leg.smoothedTarget);
+        leg.movePenetrating = false;
+        leg.plantedWeight = 0;
+        leg.weight = 1;
+        leg.offsetY = leg.smoothedTarget.y - footWorld.y;
+        this.updateFootDebug(leg, leg.smoothedTarget);
+        return true;
+    }
+
+    /** 根据地形需求权重统一融合动画轨迹、预测落点和摆动净空。 */
+    private resolvePredictiveSwingFoot(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+        phase: FootPhaseRuntimeState | undefined,
+    ): boolean {
+        if (
+            !this.predictivePlacement
+            || !phase
+            || leg.planted
+        ) {
+            return false;
+        }
+
+        const state = leg.predictive;
+
+        if (
+            state.mode !== "active"
+            || !Number.isFinite(state.score)
+            || state.predictionWeight <= 0.001
+        ) {
+            return false;
+        }
+
+        // 移动平台每帧刷新当前预测线路的世界空间落点。
+        refreshPredictiveSupportAnchor(leg, this.predictiveScratch, this.debug);
+
+        // 当前预测落点相对动画预计落点的世界空间修正。
+        const landingCorrection = this.tmpV1.subVectors(
+            state.landingTarget,
+            state.animatedLanding,
+        );
+
+        // 把启用后的剩余摆腿阶段重新映射到 0 到 1。
+        const localProgress = getPredictiveLocalProgress(
+            state.trajectoryProgress,
+            state.trajectoryStartProgress,
+        );
+
+        // 平滑渐隐重规划起点偏移，并渐入落点修正。
+        const warpAlpha = MathUtils.smoothstep(localProgress, 0, 1);
+
+        // 保留动画摆腿轨迹，只叠加连续起点、预测落点和地形净空修正。
+        leg.smoothedTarget
+            .copy(footWorld)
+            .addScaledVector(
+                state.trajectoryStartOffset,
+                1 - warpAlpha,
+            )
+            .addScaledVector(
+                landingCorrection,
+                warpAlpha,
+            )
+            .addScaledVector(
+                this.up,
+                state.trajectoryClearance
+                    * getPredictiveClearanceShape(localProgress),
+            );
+
+        // 骨盆使用当前帧轨迹目标，不能传尚未到达的最终落点。
+        leg.pelvisTarget.copy(leg.smoothedTarget);
+
+        // 最终仍然尊重腿长和膝盖安全范围。
+        this.clampPredictiveTargetToReach(
+            leg,
+            leg.smoothedTarget,
+        );
+
+        state.trajectoryCurrentTarget.copy(
+            leg.smoothedTarget,
+        );
+
+        // 启用后平滑增加位置 IK 权重，避免接管首帧改变腿部姿态。
+        const predictionBlend = MathUtils.smoothstep(
+            localProgress,
+            0,
+            PREDICTION_IK_BLEND_END,
+        );
+        const predictionIKWeight = state.releaseActive
+            ? MathUtils.lerp(1, state.predictionWeight, predictionBlend)
+            : state.predictionWeight * predictionBlend;
+        if (state.releaseActive && predictionBlend >= 1) {
+            state.releaseOffset.set(0, 0, 0);
+            state.releaseActive = false;
+        }
+        if (predictionIKWeight <= 0.001) {
+            state.debugTrajectoryVisible = false;
+            return false;
+        }
+        leg.hasPelvisTarget = true;
+        leg.movePenetrating = false;
+        leg.plantedWeight = 0;
+        leg.weight = predictionIKWeight;
+
+        leg.offsetY =
+            leg.smoothedTarget.y
+            - footWorld.y;
+
+        leg.hitPoint.copy(
+            state.supportPoint,
+        );
+
+        leg.hitNormal.copy(
+            state.landingNormal,
+        );
+
+        leg.supportPoint.copy(
+            state.supportPoint,
+        );
+
+        leg.supportNormal.copy(
+            state.landingNormal,
+        );
+
+        // 调试继续使用当前预测落点和轨迹。
+        this.rebuildPredictiveDebugTrajectory(leg);
+        this.updateFootDebug(
+            leg,
+            state.supportPoint,
+        );
+
+        return true;
+    }
+
+    /** 把脚的 up 部分旋到地面法线，并施加最大倾角和对齐权重。 */
+    private getConstrainedFootAlign(
+        normal: Vector3,
+        alignWeight: number,
+        target: Quaternion,
+    ): Quaternion {
+        target.setFromUnitVectors(this.up, normal);
+        const realAngle = 2 * Math.acos(MathUtils.clamp(target.w, -1, 1));
+        if (realAngle > this.maxFootTilt && realAngle > 1e-6) {
+            target.slerp(this.identityQ, 1 - this.maxFootTilt / realAngle);
+        }
+        target.slerp(this.identityQ, 1 - alignWeight);
+        return target;
+    }
+
+    /** 只合并最高命中所在的近似共面点，避免跨台阶平均出不存在的斜面。 */
+    private mergeCoplanarGroundHits(
+        hits: Array<FootIKGroundHit | null>,
+        highest: FootIKGroundHit,
+        supportPoint: Vector3,
+        supportNormal: Vector3,
+    ): number {
+        const planeEpsilon = Math.max(1e-6, 2 * this.appliedScale);
+        supportPoint.set(0, 0, 0);
+        supportNormal.set(0, 0, 0);
+        let supportCount = 0;
+        for (const hit of hits) {
+            if (!hit) continue;
+            const planeDistance = Math.abs(
+                highest.normal.dot(this.tmpV5.copy(hit.point).sub(highest.point)),
+            );
+            if (planeDistance > planeEpsilon || hit.normal.dot(highest.normal) < 0.95) continue;
+            supportPoint.add(hit.point);
+            supportNormal.add(hit.normal);
+            supportCount++;
+        }
+        if (supportCount > 0) {
+            supportPoint.multiplyScalar(1 / supportCount);
+            supportNormal.normalize();
+        }
+        return supportCount;
+    }
+
+    /** 按指定膝盖弯曲角反算双骨链的安全伸展距离。 */
+    private getSafeLegReach(upperLen: number, lowerLen: number, kneeBend: number): number {
+        return Math.sqrt(
+            upperLen * upperLen
+            + lowerLen * lowerLen
+            + 2 * upperLen * lowerLen * Math.cos(kneeBend),
+        );
     }
 
     /** 将预测目标限制在当前髋部的安全可达区间，避免跑步大步幅把膝盖拉到极限。 */
@@ -1138,16 +1353,8 @@ export class FootIK {
         const foot = leg.foot.getWorldPosition(this.tmpV3);
         const upperLen = Math.max(0.0001, hip.distanceTo(knee));
         const lowerLen = Math.max(0.0001, knee.distanceTo(foot));
-        const safeMaxReach = Math.sqrt(
-            upperLen * upperLen
-            + lowerLen * lowerLen
-            + 2 * upperLen * lowerLen * Math.cos(this.pelvisKneeBend),
-        );
-        const safeMinReach = Math.sqrt(
-            upperLen * upperLen
-            + lowerLen * lowerLen
-            + 2 * upperLen * lowerLen * Math.cos(this.maxKneeBend),
-        );
+        const safeMaxReach = this.getSafeLegReach(upperLen, lowerLen, this.pelvisKneeBend);
+        const safeMinReach = this.getSafeLegReach(upperLen, lowerLen, this.maxKneeBend);
         const hipToTarget = this.tmpV4.subVectors(target, hip);
         const targetDistance = hipToTarget.length();
         if (targetDistance < 1e-6) return;
@@ -1165,24 +1372,26 @@ export class FootIK {
         const samples = leg.soleSamples;
         // 设计尺度约 1 个单位。
         const stickEpsilon = Math.max(1e-6, this.appliedScale);
+        const hits = this.sampleGroundHitSlots;
 
         let maxY = -Infinity;
         let maxIndex = -1;
         let maxHit: FootIKGroundHit | null = null;
-        const hits: Array<FootIKGroundHit | null> = new Array(samples.length).fill(null);
 
         for (let i = 0; i < samples.length; i++) {
             const sample = samples[i];
             sample.hasHit = false;
+            hits[i] = null;
             const hit = this.castGroundAtSample(sample.point);
             if (!hit) continue;
             sample.hasHit = true;
             sample.hitPoint.copy(hit.point);
-            hits[i] = hit;
-            if (hit.point.y > maxY) {
-                maxY = hit.point.y;
+            const stored = copyGroundHit(hit, this.sampleGroundHits[i]);
+            hits[i] = stored;
+            if (stored.point.y > maxY) {
+                maxY = stored.point.y;
                 maxIndex = i;
-                maxHit = hit;
+                maxHit = stored;
             }
         }
 
@@ -1203,35 +1412,23 @@ export class FootIK {
         }
 
         // 只合并最高命中所在的近似共面点，避免跨台阶时生成不存在的中间斜面。
-        const planeEpsilon = Math.max(1e-6, 2 * this.appliedScale);
-        leg.supportPoint.set(0, 0, 0);
-        leg.supportNormal.set(0, 0, 0);
-        let supportCount = 0;
-        for (const sampleHit of hits) {
-            if (!sampleHit) continue;
-            const planeDistance = Math.abs(
-                bestHit.normal.dot(this.tmpV4.copy(sampleHit.point).sub(bestHit.point)),
-            );
-            if (planeDistance > planeEpsilon || sampleHit.normal.dot(bestHit.normal) < 0.95) continue;
-            leg.supportPoint.add(sampleHit.point);
-            leg.supportNormal.add(sampleHit.normal);
-            supportCount++;
-        }
-
-        if (supportCount > 0) {
-            leg.supportPoint.multiplyScalar(1 / supportCount);
-            leg.supportNormal.normalize();
-        } else {
+        const supportCount = this.mergeCoplanarGroundHits(
+            hits,
+            bestHit,
+            leg.supportPoint,
+            leg.supportNormal,
+        );
+        if (supportCount <= 0) {
             leg.supportPoint.copy(bestHit.point);
             leg.supportNormal.copy(bestHit.normal);
         }
 
         leg.bestGroundSampleIndex = bestIndex;
         leg.footSamplePoint.copy(samples[bestIndex].point);
-        return {
-            point: bestHit.point,
-            normal: leg.supportNormal,
-        };
+        this.bestGroundHit.point.copy(bestHit.point);
+        this.bestGroundHit.normal.copy(leg.supportNormal);
+        this.bestGroundHit.object = bestHit.object;
+        return this.bestGroundHit;
     }
 
     // 基于初始化姿态，把脚底四个采样点固定到 foot 骨骼本地空间。
@@ -1304,12 +1501,11 @@ export class FootIK {
         if (supportNormal.y <= 0.18) return this.getFootGroundOffset(leg);
 
         const footWorldQ = leg.foot.getWorldQuaternion(this.tmpQ1);
-        const alignQ = this.tmpQ2.setFromUnitVectors(this.up, supportNormal);
-        const realAngle = 2 * Math.acos(MathUtils.clamp(alignQ.w, -1, 1));
-        if (realAngle > this.maxFootTilt) {
-            alignQ.slerp(this.identityQ, 1 - this.maxFootTilt / realAngle);
-        }
-        alignQ.slerp(this.identityQ, 1 - this.footAlignWeight);
+        const alignQ = this.getConstrainedFootAlign(
+            supportNormal,
+            this.footAlignWeight,
+            this.tmpQ2,
+        );
         const targetWorldQ = alignQ.multiply(footWorldQ);
         const worldScale = leg.foot.getWorldScale(this.tmpV4);
 
@@ -1354,6 +1550,11 @@ export class FootIK {
         return this.castGroundFrom(sampleWorld.x, sampleWorld.y + this.sampleRayOriginY, sampleWorld.z);
     }
 
+    // 读取本帧碰撞网格，供后续脚底射线共用。
+    private refreshColliderMeshes(): void {
+        this.colliderMeshes = this.player?.getColliderMeshes() ?? this.colliderMeshes;
+    }
+
     // 优先读取移动系统最终采用的支撑。
     private castCapsuleGround(): FootIKGroundHit | null {
         const capsule = this.player?.playerCapsule;
@@ -1365,27 +1566,33 @@ export class FootIK {
         const getGroundSupport = this.player?.getGroundSupport;
         if (getGroundSupport && !ignoreSupport) {
             const support = getGroundSupport.call(this.player);
-            return support
-                ? { point: support.point, normal: support.normal }
-                : null;
+            if (!support) return null;
+            this.capsuleHit.point.copy(support.point);
+            this.capsuleHit.normal.copy(support.normal);
+            this.capsuleHit.object = undefined;
+            return this.capsuleHit;
         }
 
-        return this.castGroundFrom(capsule.position.x, capsule.position.y, capsule.position.z);
+        const hit = this.castGroundFrom(
+            capsule.position.x,
+            capsule.position.y,
+            capsule.position.z,
+        );
+        return hit ? copyGroundHit(hit, this.capsuleHit) : null;
     }
 
-    // 从指定世界坐标向下射线检测可踩踏地面。
+    // 从指定世界坐标向下检测可踩踏地面，结果写入复用命中对象。
     private castGroundFrom(x: number, y: number, z: number): FootIKGroundHit | null {
-        const meshes = this.player?.getColliderMeshes() ?? [];
         this.raycaster.ray.origin.set(x, y, z);
-        const hits = this.raycaster.intersectObjects(meshes, false);
-        const meshHit = hits.find(hit => this.getMeshWorldHitNormal(hit, this.tmpV3).y > 0.18);
-        let bestHit: FootIKGroundHit | null = null;
-        if (meshHit) {
-            bestHit = {
-                point: meshHit.point,
-                normal: this.getMeshWorldHitNormal(meshHit, this.tmpV3).clone(),
-                object: meshHit.object,
-            };
+        const hits = this.raycaster.intersectObjects(this.colliderMeshes, false);
+        let foundMesh = false;
+        for (let i = 0; i < hits.length; i++) {
+            const meshHit = hits[i];
+            if (this.getMeshWorldHitNormal(meshHit, this.groundHit.normal).y <= 0.18) continue;
+            this.groundHit.point.copy(meshHit.point);
+            this.groundHit.object = meshHit.object;
+            foundMesh = true;
+            break;
         }
 
         const dynamicHit = this.player?.raycastDynamicGround?.(
@@ -1393,15 +1600,16 @@ export class FootIK {
             0.18,
             FOOT_IK_IGNORED_DYNAMIC_KINDS,
         );
-        if (!dynamicHit) return bestHit;
+        if (!dynamicHit) return foundMesh ? this.groundHit : null;
         const distance = y - dynamicHit.point.y;
-        if (distance < this.raycaster.near || distance > this.raycaster.far) return bestHit;
-        if (bestHit && bestHit.point.y >= dynamicHit.point.y) return bestHit;
-        return {
-            point: dynamicHit.point.clone(),
-            normal: dynamicHit.normal.clone(),
-            object: dynamicHit.body?.mesh,
-        };
+        if (distance < this.raycaster.near || distance > this.raycaster.far) {
+            return foundMesh ? this.groundHit : null;
+        }
+        if (foundMesh && this.groundHit.point.y >= dynamicHit.point.y) return this.groundHit;
+        this.groundHit.point.copy(dynamicHit.point);
+        this.groundHit.normal.copy(dynamicHit.normal);
+        this.groundHit.object = dynamicHit.body?.mesh;
+        return this.groundHit;
     }
 
     // 将 mesh 射线命中的局部法线转换为世界空间法线。
@@ -1518,11 +1726,7 @@ export class FootIK {
         const foot = leg.foot.getWorldPosition(this.tmpV3);
         const upperLen = Math.max(0.0001, hip.distanceTo(knee));
         const lowerLen = Math.max(0.0001, knee.distanceTo(foot));
-        const maxReach = Math.sqrt(
-            upperLen * upperLen
-            + lowerLen * lowerLen
-            + 2 * upperLen * lowerLen * Math.cos(this.pelvisKneeBend),
-        );
+        const maxReach = this.getSafeLegReach(upperLen, lowerLen, this.pelvisKneeBend);
 
         const deltaX = leg.pelvisTarget.x - hip.x;
         const deltaY = leg.pelvisTarget.y - hip.y;
@@ -1538,6 +1742,76 @@ export class FootIK {
         return Math.min(0, deltaY + verticalReach);
     }
 
+    /** 在预测摆腿末段逐渐把脚掌旋转到落点支撑面。 */
+    private preAlignPredictiveLandingRotation(
+        leg: ReadyFootIKLeg,
+        phase: FootPhaseRuntimeState | undefined,
+    ): void {
+        if (!phase) return;
+
+        const state = leg.predictive;
+
+        if (
+            state.mode !== "active"
+            || leg.planted
+            || state.landingNormal.y <= 0.18
+        ) {
+            return;
+        }
+
+        const localProgress = getPredictiveLocalProgress(
+            state.trajectoryProgress,
+            state.trajectoryStartProgress,
+        );
+
+        // 启用后先保留动画旋转，进入末段后再逐渐贴合坡面。
+        const rotationWeight = MathUtils.smoothstep(
+            localProgress,
+            PREDICTION_ROTATION_WARP_START,
+            1,
+        ) * state.predictionWeight;
+
+        if (rotationWeight <= 0.001) return;
+
+        this.getConstrainedFootAlign(
+            state.landingNormal,
+            this.footAlignWeight,
+            this.tmpQ2,
+        );
+        const targetWorldQ = this.tmpQ3
+            .copy(this.tmpQ2)
+            .multiply(state.animatedLandingRotation);
+
+        // 从当前动画旋转平滑过渡到预测落脚旋转。
+        const currentWorldQ =
+            leg.foot.getWorldQuaternion(
+                this.tmpQ1,
+            );
+
+        currentWorldQ.slerp(
+            targetWorldQ,
+            rotationWeight,
+        );
+
+        const parent = leg.foot.parent;
+        if (!parent) return;
+
+        const parentWorldQ =
+            parent.getWorldQuaternion(
+                this.tmpQ4,
+            );
+
+        this.capture(leg.foot);
+
+        leg.foot.quaternion.copy(
+            parentWorldQ
+                .invert()
+                .multiply(currentWorldQ),
+        );
+
+        leg.foot.updateMatrixWorld(true);
+    }
+
     // 对指定腿执行 IK 求解并贴合脚掌。
     private applyLeg(side: FootIKSide, useStraightPole: boolean): void {
         const leg = this.legs[side];
@@ -1548,7 +1822,7 @@ export class FootIK {
 
         const predictiveSwing = this.predictivePlacement
             && !leg.planted
-            && leg.predictive.mode === "committed";
+            && leg.predictive.mode === "active";
         if (predictiveSwing) {
             // 骨盆修正后再检查一次可达范围，并沿用动画膝盖 pole 处理跑步和转向姿态。
             this.clampPredictiveTargetToReach(leg, leg.smoothedTarget);
@@ -1563,6 +1837,13 @@ export class FootIK {
             useStraightPole && !predictiveSwing,
         );
         this.preserveFootWorldRotation(leg, this.savedFootWorldQ, leg.weight);
+        // 预测摆动脚在接近落地时才逐渐旋到支撑面。
+        if (predictiveSwing) {
+            this.preAlignPredictiveLandingRotation(
+                leg,
+                this.footPhaseState?.[side],
+            );
+        }
         // 支撑脚离地后按剩余相位权重逐渐释放坡面旋转。
         // 普通摆动脚只在防穿透时贴合坡面，预测线路不额外接管脚掌旋转。
         if (
@@ -1659,6 +1940,13 @@ export class FootIK {
             ? contactOffset
             : MathUtils.clamp(contactOffset, 0, this.maxFootRaise);
         if (Math.abs(contactOffset) <= this.snapEpsilon) return;
+        // 站住时较大的剩余高度交给下一帧的时间阻尼。
+        if (
+            leg.planted
+            && Math.abs(contactOffset) > Math.max(this.snapEpsilon, 4 * this.appliedScale)
+        ) {
+            return;
+        }
 
         this.savedAlignedFootWorldQ.copy(leg.foot.getWorldQuaternion(this.tmpQ1));
         const correctedTarget = this.tmpV2.copy(footWorld).addScaledVector(this.up, contactOffset);
@@ -1675,14 +1963,11 @@ export class FootIK {
         this.capture(leg.foot);
 
         const footWorldQ = leg.foot.getWorldQuaternion(this.tmpQ1);
-        const alignQ = this.tmpQ2.setFromUnitVectors(this.up, leg.hitNormal);
-
-        const maxTilt = this.maxFootTilt;
-        const realAngle = 2 * Math.acos(MathUtils.clamp(alignQ.w, -1, 1));
-        if (realAngle > maxTilt) {
-            alignQ.slerp(this.identityQ, 1 - maxTilt / realAngle);
-        }
-        alignQ.slerp(this.identityQ, 1 - leg.weight * this.footAlignWeight);
+        const alignQ = this.getConstrainedFootAlign(
+            leg.hitNormal,
+            leg.weight * this.footAlignWeight,
+            this.tmpQ2,
+        );
 
         const targetWorldQ = alignQ.multiply(footWorldQ);
         const parentWorldQ = leg.foot.parent?.getWorldQuaternion(this.tmpQ3);
@@ -1768,8 +2053,8 @@ export class FootIK {
             predictionSearchRadius: this.toBaseDistance(this.predictionSearchRadius),
             maxPredictionCorrection: this.toBaseDistance(this.maxPredictionCorrection),
             predictionMinNormalY: this.predictionMinNormalY,
-            predictionMinSupportSamples: this.predictionMinSupportSamples,
             swingClearance: this.toBaseDistance(this.swingClearance),
+            maxPredictionClearance: this.toBaseDistance(this.maxPredictionClearance),
         };
     }
 
@@ -1864,15 +2149,11 @@ export class FootIK {
         if (options.predictionMinNormalY !== undefined) {
             this.predictionMinNormalY = MathUtils.clamp(options.predictionMinNormalY, 0, 1);
         }
-        if (options.predictionMinSupportSamples !== undefined) {
-            this.predictionMinSupportSamples = MathUtils.clamp(
-                Math.round(options.predictionMinSupportSamples),
-                1,
-                4,
-            );
-        }
         if (options.swingClearance !== undefined) {
             this.swingClearance = this.scaleDistance(options.swingClearance);
+        }
+        if (options.maxPredictionClearance !== undefined) {
+            this.maxPredictionClearance = this.scaleDistance(options.maxPredictionClearance);
         }
         if (options.footPhaseGroundThreshold !== undefined) {
             this.footPhaseGroundThreshold = this.scaleDistance(options.footPhaseGroundThreshold);
@@ -1922,8 +2203,10 @@ export class FootIK {
     getPredictiveFootDebugText(side: FootIKSide): string {
         if (!this.predictivePlacement) return "disabled";
         const state = this.legs[side].predictive;
-        if (!Number.isFinite(state.score)) return state.mode;
-        return `${state.mode} score=${state.score.toFixed(2)}`;
+        // d 为落点相对胶囊支撑面的上台高度，swing 为摆腿路径上的最大凸起。
+        const demand = `d=${state.debugPlaneLift.toFixed(3)} swing=${state.debugSwingLift.toFixed(3)}`;
+        if (!Number.isFinite(state.score)) return `${state.mode} ${demand}`;
+        return `${state.mode} ${demand} score=${state.score.toFixed(2)}`;
     }
 
 }

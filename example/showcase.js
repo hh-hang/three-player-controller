@@ -345,6 +345,7 @@ async function init() {
     footIK = new FootIK({
         enabled: true,
         soleSkinThickness: 1.6,
+        predictivePlacement: true,
         skeleton: {
             hips: "pelvis",
             legs: {
@@ -1558,12 +1559,15 @@ function createDebugPanel() {
         enableZoom: player?.cam?.zoomEnabled ?? true,
         footIKEnabled: footIKOptions.enabled ?? true,
         footIKDebug: footIKOptions.debug ?? false,
+        predictivePlacement: footIKOptions.predictivePlacement ?? false,
         leftFootPhase: "",
         leftFootLand: "--",
         leftFootIKWeight: 0,
+        leftPrediction: "disabled",
         rightFootPhase: "",
         rightFootLand: "--",
         rightFootIKWeight: 0,
+        rightPrediction: "disabled",
         maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 50, 0),
         maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
@@ -1572,6 +1576,7 @@ function createDebugPanel() {
         soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
         soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
+        maxPredictionClearance: roundedValue(footIKOptions.maxPredictionClearance, 50, 0),
         maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
     };
     footIKDebugParams = params;
@@ -1674,14 +1679,19 @@ function createDebugPanel() {
     footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
         footIK?.setDebugEnabled(value && params.footIKEnabled);
     });
+    footIKFolder.add(params, "predictivePlacement").name("Predictive Placement").onChange((value) => {
+        footIK?.configure({ predictivePlacement: value });
+    });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
     footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "leftPrediction").name("Left Prediction").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "rightPrediction").name("Right Prediction").listen().disable();
     footIKRuntimeFolder.close();
 
     const pelvisFolder = footIKFolder.addFolder("Pelvis");
@@ -1716,6 +1726,12 @@ function createDebugPanel() {
         applyFootIKOptions({ soleSkinThickness: value });
     });
     soleFolder.close();
+
+    const predictionFolder = footIKFolder.addFolder("Prediction");
+    predictionFolder.add(params, "maxPredictionClearance", 0, 80, 1).name("Max Clearance").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxPredictionClearance: value });
+    });
+    predictionFolder.close();
     footIKFolder.close();
     characterFolder.open();
 
@@ -1799,9 +1815,11 @@ function updateFootIKDebugPanel() {
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
     footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
+    footIKDebugParams.leftPrediction = footIK.getPredictiveFootDebugText("left");
     footIKDebugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
     footIKDebugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
     footIKDebugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+    footIKDebugParams.rightPrediction = footIK.getPredictiveFootDebugText("right");
 }
 
 function formatFootLandTime(value) {

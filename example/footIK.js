@@ -2,9 +2,7 @@ import {
     ACESFilmicToneMapping,
     AmbientLight,
     BoxGeometry,
-    CameraHelper,
     DirectionalLight,
-    DirectionalLightHelper,
     Group,
     LineBasicMaterial,
     LineSegments,
@@ -33,8 +31,6 @@ let renderer;
 let controls;
 let player;
 let footIK;
-let sunDebugHelper;
-let sunShadowCameraHelper;
 let sky;
 let gui;
 let footIKDebugParams;
@@ -53,7 +49,7 @@ async function init() {
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.toneMapping = ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 0.8;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = VSMShadowMap;
     renderer.setAnimationLoop(animate);
@@ -107,12 +103,6 @@ async function init() {
     skyUniforms["mieCoefficient"].value = 0.005;
     skyUniforms["mieDirectionalG"].value = 0.99;
     updateSkySun(sun);
-    sunDebugHelper = new DirectionalLightHelper(sun, 1.2, 0xffd166);
-    sunDebugHelper.visible = false;
-    scene.add(sunDebugHelper);
-    sunShadowCameraHelper = new CameraHelper(sun.shadow.camera);
-    sunShadowCameraHelper.visible = false;
-    scene.add(sunShadowCameraHelper);
 
     // 测试场景
     const staticCollider = buildTestCourse();
@@ -184,6 +174,7 @@ async function init() {
     footIK = new FootIK({
         skeleton,
         soleSkinThickness: 1.6,
+        predictivePlacement: true,
     });
     player.use(footIK);
 
@@ -208,7 +199,6 @@ function createDebugPanel() {
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
-        sunDebug: false,
         footIKEnabled: footIKOptions.enabled ?? true,
         footIKDebug: footIKOptions.debug ?? false,
         predictivePlacement: footIKOptions.predictivePlacement ?? false,
@@ -225,9 +215,10 @@ function createDebugPanel() {
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
         maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
         soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
-        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
+        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 4),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
         soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
+        maxPredictionClearance: roundedValue(footIKOptions.maxPredictionClearance, 50, 0),
     };
     footIKDebugParams = params;
 
@@ -256,15 +247,7 @@ function createDebugPanel() {
     });
     collisionFolder.open();
 
-    const sceneFolder = gui.addFolder("Scene");
-    sceneFolder.add(params, "sunDebug").name("Sun Debug").onChange((value) => {
-        sunDebugHelper.visible = value;
-        sunShadowCameraHelper.visible = value;
-    });
-    sceneFolder.close();
-
-    const characterFolder = gui.addFolder("Character");
-    const footIKFolder = characterFolder.addFolder("Foot IK");
+    const footIKFolder = gui.addFolder("Foot IK");
     footIKFolder.add(params, "footIKEnabled").name("Enabled").onChange((value) => {
         footIK?.setEnabled(value);
         footIK?.setDebugEnabled(value && params.footIKDebug);
@@ -319,8 +302,13 @@ function createDebugPanel() {
         applyFootIKOptions({ soleSkinThickness: value });
     });
     soleFolder.close();
-    footIKFolder.close();
-    characterFolder.open();
+
+    const predictionFolder = footIKFolder.addFolder("Prediction");
+    predictionFolder.add(params, "maxPredictionClearance", 0, 80, 1).name("Max Clearance").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxPredictionClearance: value });
+    });
+    predictionFolder.close();
+    footIKFolder.open();
 }
 
 // 更新天空太阳方向。
@@ -499,8 +487,6 @@ function enableModelShadows(root) {
 
 // 每帧调用
 function animate() {
-    sunDebugHelper?.update();
-    sunShadowCameraHelper?.update();
     if (player) {
         player.update();
     } else {
