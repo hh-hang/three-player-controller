@@ -73,12 +73,21 @@ import type { TwoBoneIKScratch } from "./internal/twoBoneIK";
 const FOOT_IK_IGNORED_DYNAMIC_KINDS = ["sphere"] as const;
 /** 摆腿进入末段后锁定地形结果，避免落地前继续切换支撑面。 */
 const PREDICTION_LOCK_PROGRESS = 0.88;
-/** 预测线路启用后达到该局部进度时完成位置 IK 渐入。 */
-const PREDICTION_IK_BLEND_END = 0.35;
 /** 支撑落点残差在新摆腿前段完成释放的相位比例。 */
 const PREDICTION_RELEASE_PROGRESS = 0.25;
-/** 反应式 IK 追目标和渐出的阻尼系数。 */
-const REACTIVE_IK_DAMP = 40;
+/** 支撑脚追贴地目标的阻尼系数。 */
+const REACTIVE_IK_PLANTED_CHASE_DAMP = 40;
+/** 支撑脚把修正还给动画时的阻尼系数。 */
+const REACTIVE_IK_PLANTED_FADE_DAMP = 40;
+/** 摆动脚追防穿透目标的阻尼系数。 */
+const REACTIVE_IK_SWING_CHASE_DAMP = 40;
+/** 摆动脚把修正还给动画时的阻尼系数。 */
+const REACTIVE_IK_SWING_FADE_DAMP = 40;
+
+function getReactiveIkDamp(planted: boolean, chase: boolean): number {
+    if (planted) return chase ? REACTIVE_IK_PLANTED_CHASE_DAMP : REACTIVE_IK_PLANTED_FADE_DAMP;
+    return chase ? REACTIVE_IK_SWING_CHASE_DAMP : REACTIVE_IK_SWING_FADE_DAMP;
+}
 
 function createGroundHit(): FootIKGroundHit {
     return {
@@ -122,7 +131,6 @@ export class FootIK {
     private sampleRayOriginY = 90;
     private raycastFar = 440;
     private snapEpsilon = 0.02;
-    private pelvisRaiseCoplanarThreshold = 8;
     private pelvisRaiseEpsilon = 4;
     private pelvisRaiseMinNormalY = 0.98;
     private pelvisRaiseWeightThreshold = 0.8;
@@ -377,7 +385,6 @@ export class FootIK {
         this.sampleRayOriginY *= ratio;
         this.raycastFar *= ratio;
         this.snapEpsilon *= ratio;
-        this.pelvisRaiseCoplanarThreshold *= ratio;
         this.pelvisRaiseEpsilon *= ratio;
         this.predictionSearchRadius *= ratio;
         this.maxPredictionCorrection *= ratio;
@@ -470,6 +477,20 @@ export class FootIK {
         resetPredictiveFootState(this.legs.right.predictive);
     }
 
+    /** 空中 / 停用贴地时丢掉反应式 IK 残留，避免落地从起飞前的世界高度往下坠。 */
+    private resetReactiveIkState(): void {
+        this.pelvisOffset = 0;
+        for (const leg of Object.values(this.legs)) {
+            if (!isReadyLeg(leg)) continue;
+            leg.weight = 0;
+            leg.offsetY = 0;
+            leg.plantedWeight = 0;
+            leg.hasPelvisTarget = false;
+            leg.movePenetrating = false;
+            leg.foot.getWorldPosition(leg.smoothedTarget);
+        }
+    }
+
     // 恢复上一帧 IK 修改前的骨骼姿态
     private restore(): void {
         // 先恢复上一帧的动画原始姿态，再让 mixer 推进当前帧
@@ -504,6 +525,8 @@ export class FootIK {
                 resetPredictiveFootState(this.legs.left.predictive);
                 resetPredictiveFootState(this.legs.right.predictive);
             }
+            player?.playerModel?.updateMatrixWorld(true);
+            this.resetReactiveIkState();
             this.setDebugVisible(false);
             return;
         }
@@ -627,8 +650,8 @@ export class FootIK {
         // 改变水平落点的预测结果在支撑阶段继续使用原落点，避免切回动画时跳变。
         if (leg.planted && this.resolvePredictivePlantedFoot(leg, footWorld, delta)) return;
 
-        // 统一融合后的预测摆动脚不再进入原有防穿透分支。
-        if (!leg.planted && this.resolvePredictiveSwingFoot(leg, footWorld, phase)) return;
+        // 预测摆动自己做四角防穿透，并从上一帧反应式权重/高度阻尼过去。
+        if (!leg.planted && this.resolvePredictiveSwingFoot(leg, footWorld, phase, delta)) return;
         // 偏移落点留下的支撑残差在新摆腿前段连续归还给动画。
         if (!leg.planted && this.resolvePredictiveReleaseFoot(leg, footWorld)) return;
 
@@ -683,7 +706,7 @@ export class FootIK {
             leg.plantedWeight = MathUtils.damp(
                 leg.plantedWeight ?? 0,
                 wantedPlantedWeight,
-                REACTIVE_IK_DAMP,
+                getReactiveIkDamp(true, wantedPlantedWeight > 0),
                 delta,
             );
         }
@@ -720,10 +743,11 @@ export class FootIK {
         const previousAlongUp = hasPrevious
             ? leg.smoothedTarget.dot(this.up)
             : footAlongUp;
+        const damp = getReactiveIkDamp(leg.planted, wantedWeight > 0.001);
         let dampedAlongUp = MathUtils.damp(
             previousAlongUp,
             wantedAlongUp,
-            REACTIVE_IK_DAMP,
+            damp,
             delta,
         );
         if (Math.abs(dampedAlongUp - wantedAlongUp) < this.snapEpsilon) {
@@ -734,7 +758,7 @@ export class FootIK {
         leg.weight = MathUtils.damp(
             leg.weight,
             wantedWeight,
-            REACTIVE_IK_DAMP,
+            damp,
             delta,
         );
         if (leg.weight < 0.001) leg.weight = 0;
@@ -754,7 +778,7 @@ export class FootIK {
         leg.plantedWeight = MathUtils.damp(
             leg.plantedWeight,
             0,
-            REACTIVE_IK_DAMP,
+            getReactiveIkDamp(leg.planted, false),
             delta,
         );
         if (leg.plantedWeight < 0.001) leg.plantedWeight = 0;
@@ -868,7 +892,7 @@ export class FootIK {
                             state.releaseOffset,
                             this.getPredictiveReleaseWeight(state),
                         )
-                    : footWorld;
+                    : this.getPredictiveSwingStart(leg, footWorld);
             const trajectoryStartProgress = state.mode === "active"
                 ? state.trajectoryStartProgress
                 : state.trajectoryProgress;
@@ -1170,11 +1194,23 @@ export class FootIK {
         return true;
     }
 
+    /** 预测摆腿起点：已有反应式输出时从抬过的脚开始。 */
+    private getPredictiveSwingStart(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+    ): Vector3 {
+        if (leg.weight > 0.001 || Math.abs(leg.offsetY) > this.snapEpsilon) {
+            return this.predictiveScratch.trajectoryStart.copy(leg.smoothedTarget);
+        }
+        return footWorld;
+    }
+
     /** 根据地形需求权重统一融合动画轨迹、预测落点和摆动净空。 */
     private resolvePredictiveSwingFoot(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
         phase: FootPhaseRuntimeState | undefined,
+        delta: number,
     ): boolean {
         if (
             !this.predictivePlacement
@@ -1211,6 +1247,11 @@ export class FootIK {
 
         // 平滑渐隐重规划起点偏移，并渐入落点修正。
         const warpAlpha = MathUtils.smoothstep(localProgress, 0, 1);
+        const previousAlongUp = (
+            leg.weight > 0.001 || Math.abs(leg.offsetY) > this.snapEpsilon
+        )
+            ? leg.smoothedTarget.dot(this.up)
+            : footWorld.dot(this.up);
 
         // 保留动画摆腿轨迹，只叠加连续起点、预测落点和地形净空修正。
         leg.smoothedTarget
@@ -1229,69 +1270,84 @@ export class FootIK {
                     * getPredictiveClearanceShape(localProgress),
             );
 
+        // 按当前脚掌旋转和四角实际位置上抬，和反应式摆动防穿透同一套。
+        const hit = this.castBestFootGround(leg);
+        if (hit) {
+            const groundOffset = Math.max(0, this.getFootGroundOffset(leg));
+            if (groundOffset <= this.maxFootRaise) {
+                leg.smoothedTarget.y = Math.max(
+                    leg.smoothedTarget.y,
+                    footWorld.y + groundOffset,
+                );
+            }
+        } else {
+            leg.hitPoint.copy(state.supportPoint);
+            leg.hitNormal.copy(state.landingNormal);
+            leg.supportPoint.copy(state.supportPoint);
+            leg.supportNormal.copy(state.landingNormal);
+        }
+
         // 骨盆使用当前帧轨迹目标，不能传尚未到达的最终落点。
-        leg.pelvisTarget.copy(leg.smoothedTarget);
-
-        // 最终仍然尊重腿长和膝盖安全范围。
-        this.clampPredictiveTargetToReach(
+        this.clampPredictiveTargetToReach(leg, leg.smoothedTarget);
+        this.dampPredictiveSwingOutput(
             leg,
-            leg.smoothedTarget,
+            footWorld,
+            previousAlongUp,
+            state.predictionWeight,
+            delta,
         );
+        leg.pelvisTarget.copy(leg.smoothedTarget);
+        state.trajectoryCurrentTarget.copy(leg.smoothedTarget);
 
-        state.trajectoryCurrentTarget.copy(
-            leg.smoothedTarget,
-        );
-
-        // 启用后平滑增加位置 IK 权重，避免接管首帧改变腿部姿态。
-        const predictionBlend = MathUtils.smoothstep(
-            localProgress,
-            0,
-            PREDICTION_IK_BLEND_END,
-        );
-        const predictionIKWeight = state.releaseActive
-            ? MathUtils.lerp(1, state.predictionWeight, predictionBlend)
-            : state.predictionWeight * predictionBlend;
-        if (state.releaseActive && predictionBlend >= 1) {
+        if (state.releaseActive) {
             state.releaseOffset.set(0, 0, 0);
             state.releaseActive = false;
         }
-        if (predictionIKWeight <= 0.001) {
-            state.debugTrajectoryVisible = false;
-            return false;
-        }
+
         leg.hasPelvisTarget = true;
         leg.movePenetrating = false;
-        leg.plantedWeight = 0;
-        leg.weight = predictionIKWeight;
 
-        leg.offsetY =
-            leg.smoothedTarget.y
-            - footWorld.y;
-
-        leg.hitPoint.copy(
-            state.supportPoint,
-        );
-
-        leg.hitNormal.copy(
-            state.landingNormal,
-        );
-
-        leg.supportPoint.copy(
-            state.supportPoint,
-        );
-
-        leg.supportNormal.copy(
-            state.landingNormal,
-        );
-
-        // 调试继续使用当前预测落点和轨迹。
         this.rebuildPredictiveDebugTrajectory(leg);
-        this.updateFootDebug(
-            leg,
-            state.supportPoint,
-        );
-
+        this.updateFootDebug(leg, hit?.point ?? state.supportPoint);
         return true;
+    }
+
+    /** 从上一帧反应式输出阻尼到本帧预测目标。 */
+    private dampPredictiveSwingOutput(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+        previousAlongUp: number,
+        wantedWeight: number,
+        delta: number,
+    ): void {
+        const wantedAlongUp = leg.smoothedTarget.dot(this.up);
+        const chase = wantedWeight > 0.001;
+        const damp = getReactiveIkDamp(false, chase);
+        let dampedAlongUp = MathUtils.damp(
+            previousAlongUp,
+            wantedAlongUp,
+            damp,
+            delta,
+        );
+        if (Math.abs(dampedAlongUp - wantedAlongUp) < this.snapEpsilon) {
+            dampedAlongUp = wantedAlongUp;
+        }
+        leg.smoothedTarget.addScaledVector(
+            this.up,
+            dampedAlongUp - wantedAlongUp,
+        );
+        leg.offsetY = leg.smoothedTarget.y - footWorld.y;
+
+        leg.weight = MathUtils.damp(leg.weight, wantedWeight, damp, delta);
+        if (leg.weight < 0.001) leg.weight = 0;
+
+        leg.plantedWeight = MathUtils.damp(
+            leg.plantedWeight,
+            0,
+            getReactiveIkDamp(false, false),
+            delta,
+        );
+        if (leg.plantedWeight < 0.001) leg.plantedWeight = 0;
     }
 
     /** 把脚的 up 部分旋到地面法线，并施加最大倾角和对齐权重。 */
@@ -1624,7 +1680,7 @@ export class FootIK {
     private applyPelvis(delta: number): void {
         if (!this.hips) return;
 
-        // 双脚同处高台面时优先上抬；其余情况只补偿超出腿长的下沉距离。
+        // 双脚都高于胶囊时按较低脚上抬，较高脚的高差留给腿 IK；其余情况只补偿超出腿长的下沉。
         const raiseOffset = this.getRequiredPelvisRaise();
         const leftDrop = isReadyLeg(this.legs.left)
             ? this.getRequiredPelvisDrop(this.legs.left)
@@ -1657,7 +1713,7 @@ export class FootIK {
         this.hips.updateMatrixWorld(true);
     }
 
-    // 双脚都稳定应用 IK 且落在同一近水平高台面时，按胶囊支撑高度差上抬骨盆。
+    // 双脚都稳定应用 IK 且支撑接近水平时，按较低脚与胶囊的高度差上抬骨盆。
     private getRequiredPelvisRaise(): number {
         const left = this.legs.left;
         const right = this.legs.right;
@@ -1675,7 +1731,6 @@ export class FootIK {
         const leftSupportY = this.getLegSupportY(left);
         const rightSupportY = this.getLegSupportY(right);
         if (!Number.isFinite(leftSupportY) || !Number.isFinite(rightSupportY)) return 0;
-        if (Math.abs(leftSupportY - rightSupportY) > this.pelvisRaiseCoplanarThreshold) return 0;
 
         const capsuleHit = this.castCapsuleGround();
         if (!capsuleHit) return 0;

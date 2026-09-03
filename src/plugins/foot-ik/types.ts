@@ -133,7 +133,7 @@ export type FootIKOptions = {
     enabled?: boolean;
     /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 50。 */
     maxPelvisDrop?: number;
-    /** 双脚同处高台面时的骨盆最大上抬距离基准值（按 scale 缩放），默认 50。 */
+    /** 双脚都高于胶囊时，按较低脚上抬骨盆的最大距离基准值（按 scale 缩放），默认 50。 */
     maxPelvisRaise?: number;
     /** 脚部 IK 最大上抬距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
     maxFootRaise?: number;

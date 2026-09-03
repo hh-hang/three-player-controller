@@ -173,6 +173,8 @@ async function init() {
 
     footIK = new FootIK({
         skeleton,
+        soleHalfWidth: 4,
+        soleToeExtend: 4,
         soleSkinThickness: 1.6,
         predictivePlacement: true,
     });
@@ -215,7 +217,7 @@ function createDebugPanel() {
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
         maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
         soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
-        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 4),
+        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
         soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
         maxPredictionClearance: roundedValue(footIKOptions.maxPredictionClearance, 50, 0),
@@ -304,7 +306,7 @@ function createDebugPanel() {
     soleFolder.close();
 
     const predictionFolder = footIKFolder.addFolder("Prediction");
-    predictionFolder.add(params, "maxPredictionClearance", 0, 80, 1).name("Max Clearance").decimals(0).onChange((value) => {
+    predictionFolder.add(params, "maxPredictionClearance", 0, 100, 1).name("Max Clearance").decimals(0).onChange((value) => {
         applyFootIKOptions({ maxPredictionClearance: value });
     });
     predictionFolder.close();

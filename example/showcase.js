@@ -344,6 +344,8 @@ async function init() {
     // 初始化脚部 IK
     footIK = new FootIK({
         enabled: true,
+        soleHalfWidth: 4,
+        soleToeExtend: 4,
         soleSkinThickness: 1.6,
         predictivePlacement: true,
         skeleton: {
