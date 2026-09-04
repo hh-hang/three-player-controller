@@ -347,6 +347,8 @@ async function init() {
         soleHalfWidth: 4,
         soleToeExtend: 4,
         soleSkinThickness: 1.6,
+        plantedHeightDamp: 10,
+        penetrationLiftDamp: 10,
         predictivePlacement: true,
         skeleton: {
             hips: "pelvis",
@@ -1562,6 +1564,7 @@ function createDebugPanel() {
         footIKEnabled: footIKOptions.enabled ?? true,
         footIKDebug: footIKOptions.debug ?? false,
         predictivePlacement: footIKOptions.predictivePlacement ?? false,
+        pelvisOffset: 0,
         leftFootPhase: "",
         leftFootLand: "--",
         leftFootIKWeight: 0,
@@ -1574,6 +1577,8 @@ function createDebugPanel() {
         maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
         maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
+        plantedHeightDamp: roundedValue(footIKOptions.plantedHeightDamp, 0, 1),
+        penetrationLiftDamp: roundedValue(footIKOptions.penetrationLiftDamp, 0, 1),
         soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
         soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
@@ -1686,6 +1691,7 @@ function createDebugPanel() {
     });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
+    footIKRuntimeFolder.add(params, "pelvisOffset").name("Pelvis Offset").decimals(2).listen().disable();
     footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
     footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
@@ -1711,6 +1717,12 @@ function createDebugPanel() {
     });
     footReachFolder.add(params, "maxFootDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => {
         applyFootIKOptions({ maxFootDrop: value });
+    });
+    footReachFolder.add(params, "plantedHeightDamp", 0, 40, 0.1).name("Planted Damp").decimals(1).onChange((value) => {
+        applyFootIKOptions({ plantedHeightDamp: value });
+    });
+    footReachFolder.add(params, "penetrationLiftDamp", 0, 40, 0.1).name("Penetration Damp").decimals(1).onChange((value) => {
+        applyFootIKOptions({ penetrationLiftDamp: value });
     });
     footReachFolder.close();
 
@@ -1814,6 +1826,7 @@ function animate(timestamp) {
 // 更新 Foot IK 运行状态只读字段。
 function updateFootIKDebugPanel() {
     if (!footIKDebugParams || !footIK) return;
+    footIKDebugParams.pelvisOffset = footIK.getPelvisOffset();
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
     footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");

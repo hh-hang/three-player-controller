@@ -839,7 +839,7 @@ export class playerController {
     getIsFlying() { return this.isFlying; }
     /** 获取落地状态。 */
     getIsOnGround() { return this.playerIsOnGround; }
-    /** 获取移动系统本帧最终采用的地面支撑；返回对象只读使用，不要修改其中向量。 */
+    /** 获取移动系统本帧最终采用的地面支撑。 */
     getGroundSupport() { return this.hasGroundSupport ? this.groundSupportHit : null; }
     /** 获取本帧实际使用的 delta（已钳制 + timeScale）。 */
     getCurrentDelta() { return this.currentDelta; }

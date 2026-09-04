@@ -139,6 +139,10 @@ export type FootIKOptions = {
     maxFootRaise?: number;
     /** 支撑脚 IK 最大下探距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
     maxFootDrop?: number;
+    /** 支撑脚贴地高度阻尼（不随 scale 缩放），默认 0；0 为立刻贴地，数值越大追得越快。 */
+    plantedHeightDamp?: number;
+    /** 摆动脚陷入上抬高度阻尼（不随 scale 缩放），默认 0；0 为立刻抬起，数值越大追得越快。 */
+    penetrationLiftDamp?: number;
     /** 虚拟脚底左右半宽基准值（按 scale 缩放），默认 7。 */
     soleHalfWidth?: number;
     /** 脚尖采样点向前延伸距离基准值（按 scale 缩放），默认 7。 */
