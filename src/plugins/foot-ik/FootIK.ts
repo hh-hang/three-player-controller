@@ -79,6 +79,9 @@ const PREDICTION_RELEASE_PROGRESS = 0.25;
 const PREDICTIVE_SWING_CHASE_DAMP = 40;
 /** 预测摆腿把修正还给动画时的阻尼系数。 */
 const PREDICTIVE_SWING_FADE_DAMP = 40;
+/** 移动直 pole 与原动画 pole 之间的内部切换阻尼。 */
+const STRAIGHT_POLE_DAMP = 10;
+const STRAIGHT_POLE_ENABLED = true;
 
 function createGroundHit(): FootIKGroundHit {
     return {
@@ -114,6 +117,7 @@ export class FootIK {
     private maxFootDrop = 50;
     private plantedHeightDamp = 0;
     private penetrationLiftDamp = 0;
+    private straightPoleWeights: Record<FootIKSide, number> = { left: 0, right: 0 };
     private soleHalfWidth = 7;
     private soleToeExtend = 7;
     private soleHeelExtend = 3;
@@ -422,6 +426,8 @@ export class FootIK {
         this.poseCache.clear();
         this.hips = null;
         this.legs = this.createEmptyLegs();
+        this.straightPoleWeights.left = 0;
+        this.straightPoleWeights.right = 0;
         // 还原到 scale=1 基准值，便于卸载后再挂载或单独 configure。
         this.rescaleDistances(1);
         this.player = null;
@@ -439,6 +445,8 @@ export class FootIK {
 
     // 解析骨骼后初始化脚底采样、脚步相位数据库和调试对象。
     private bindSkeleton(): void {
+        this.straightPoleWeights.left = 0;
+        this.straightPoleWeights.right = 0;
         const bones = collectBones(this.player?.playerModel);
         this.hips = resolveConfiguredBone(this.skeletonConfig?.hips, bones, "hips")
             ?? findHips(bones);
@@ -539,8 +547,8 @@ export class FootIK {
         this.updateFoot("left", delta, moving);
         this.updateFoot("right", delta, moving);
         this.applyPelvis(delta);
-        this.applyLeg("left", moving);
-        this.applyLeg("right", moving);
+        this.applyLeg("left", moving, delta);
+        this.applyLeg("right", moving, delta);
     }
 
     /** 根据胶囊碰撞修正后的实际位移更新水平预测速度。 */
@@ -1116,7 +1124,7 @@ export class FootIK {
                     .addScaledVector(
                         this.up,
                         plan.clearance
-                            * getPredictiveClearanceShape(localProgress),
+                        * getPredictiveClearanceShape(localProgress),
                     );
                 state.trajectoryStartOffset
                     .subVectors(
@@ -1327,7 +1335,7 @@ export class FootIK {
             .addScaledVector(
                 this.up,
                 state.trajectoryClearance
-                    * getPredictiveClearanceShape(localProgress),
+                * getPredictiveClearanceShape(localProgress),
             );
 
         // 按当前脚掌旋转和四角实际位置上抬，和反应式摆动防穿透同一套。
@@ -1927,8 +1935,18 @@ export class FootIK {
     }
 
     // 对指定腿执行 IK 求解并贴合脚掌。
-    private applyLeg(side: FootIKSide, useStraightPole: boolean): void {
+    private applyLeg(side: FootIKSide, useStraightPole: boolean, delta: number): void {
         const leg = this.legs[side];
+        const poleTarget = STRAIGHT_POLE_ENABLED && useStraightPole ? 1 : 0;
+        this.straightPoleWeights[side] = MathUtils.damp(
+            this.straightPoleWeights[side],
+            poleTarget,
+            STRAIGHT_POLE_DAMP,
+            delta,
+        );
+        if (Math.abs(this.straightPoleWeights[side] - poleTarget) < 0.001) {
+            this.straightPoleWeights[side] = poleTarget;
+        }
         if (!isReadyLeg(leg) || leg.weight <= 0.001) return;
 
         // 保存动画给出的 foot 世界旋转，普通 IK 解腿后按权重恢复该旋转。
@@ -1954,7 +1972,7 @@ export class FootIK {
             leg,
             leg.smoothedTarget,
             leg.weight,
-            useStraightPole,
+            this.straightPoleWeights[side],
         );
         this.preserveFootWorldRotation(leg, this.savedFootWorldQ, leg.weight);
         // 预测摆动脚在接近落地时才逐渐旋到支撑面。
@@ -1974,7 +1992,7 @@ export class FootIK {
             this.alignFootToGround(leg);
         }
         if (leg.planted) {
-            this.correctPostAlignSoleContact(leg, useStraightPole);
+            this.correctPostAlignSoleContact(leg);
         }
     }
 
@@ -2000,10 +2018,10 @@ export class FootIK {
         leg: ReadyFootIKLeg,
         target: Vector3,
         weight: number,
-        useStraightPole = false,
+        straightPoleWeight = 0,
     ): void {
         let kneePlaneNormal: Vector3 | undefined;
-        if (useStraightPole) {
+        if (straightPoleWeight > 0.001) {
             // 移动时用胶囊局部 +X 作为角色前后平面的法线。
             // 静止时不传此约束，让 IK 保留 idle 动画本身的膝盖 pole。
             const capsule = this.player?.playerCapsule;
@@ -2019,6 +2037,7 @@ export class FootIK {
             minKneeBend: this.minKneeBend,
             maxKneeBend: this.maxKneeBend,
             kneePlaneNormal,
+            kneePlaneWeight: straightPoleWeight,
             scratch: this.twoBoneIKScratch,
         });
     }
@@ -2026,7 +2045,6 @@ export class FootIK {
     // 脚掌贴坡会绕 foot 骨骼旋转，旋转后重新校正脚底接触。
     private correctPostAlignSoleContact(
         leg: ReadyFootIKLeg,
-        useStraightPole: boolean,
     ): void {
         if (leg.weight <= 0.001) return;
 
@@ -2071,7 +2089,7 @@ export class FootIK {
         this.savedAlignedFootWorldQ.copy(leg.foot.getWorldQuaternion(this.tmpQ1));
         const correctedTarget = this.tmpV2.copy(footWorld).addScaledVector(this.up, contactOffset);
 
-        this.solveLeg(leg, correctedTarget, leg.weight, useStraightPole);
+        this.solveLeg(leg, correctedTarget, leg.weight);
         this.preserveFootWorldRotation(leg, this.savedAlignedFootWorldQ, 1);
     }
 
