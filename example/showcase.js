@@ -1530,40 +1530,34 @@ function applyVehicleTuning() {
 
 // 创建调试面板
 function createDebugPanel() {
-    const footIKOptions = footIK?.getOptions() ?? {};
-    const roundedValue = (value, fallback, decimals = 1) => {
-        const factor = 10 ** decimals;
-        return Math.round((value ?? fallback) * factor) / factor;
-    };
-    const playerScale = Math.max(1e-8, player?.playerModelConfig?.scale ?? PLAYER_SCALE_NORMAL);
-    const toBasePlayerValue = (value, fallback, decimals = 0) => (
-        roundedValue(Number.isFinite(value) ? value / playerScale : undefined, fallback, decimals)
-    );
+    const options = footIK.getOptions();
+    const playerScale = player.playerModelConfig.scale;
+    const toBasePlayerValue = (value) => value / playerScale;
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
         dynamicBodyDebug: false,
-        mouseSensitivity: roundedValue(player?.cam?.sensitivity, 5, 1),
-        gravity: toBasePlayerValue(player?.gravity, -2400),
-        jumpHeight: toBasePlayerValue(player?.jumpHeight, 600),
-        playerSpeed: toBasePlayerValue(player?.playerSpeed, 100),
-        playerRunSpeed: toBasePlayerValue(player?.playerRunSpeed, 600),
-        flySpeed: toBasePlayerValue(player?.playerFlySpeed, 2100),
-        playerAcceleration: roundedValue(player?.playerAcceleration, 30, 0),
-        playerDeceleration: roundedValue(player?.playerDeceleration, 30, 0),
-        timeScale: roundedValue(player?.timeScale, 1, 2),
-        minCamDistance: toBasePlayerValue(player?.cam?.minDist, 8),
-        maxCamDistance: toBasePlayerValue(player?.cam?.maxDist, 300),
-        camLookAtHeightRatio: roundedValue(player?.cam?.lookAtHeightRatio, 0.5, 2),
-        enableOverShoulderView: player?.enableOverShoulderView ?? true,
-        camOverShoulderOffsetRatio: roundedValue(player?.cam?.overShoulderOffsetRatio, 0, 2),
-        enableSpringCamera: player?.cam?.enableSpringCamera ?? true,
-        springCameraTime: roundedValue(player?.cam?.springCameraTime, 0.1, 2),
-        thirdMouseMode: player?.cam?.mouseMode ?? 1,
-        enableZoom: player?.cam?.zoomEnabled ?? true,
-        footIKEnabled: footIKOptions.enabled ?? true,
-        footIKDebug: footIKOptions.debug ?? false,
-        predictivePlacement: footIKOptions.predictivePlacement ?? false,
+        mouseSensitivity: player.cam.sensitivity,
+        gravity: toBasePlayerValue(player.gravity),
+        jumpHeight: toBasePlayerValue(player.jumpHeight),
+        playerSpeed: toBasePlayerValue(player.playerSpeed),
+        playerRunSpeed: toBasePlayerValue(player.playerRunSpeed),
+        flySpeed: toBasePlayerValue(player.playerFlySpeed),
+        playerAcceleration: player.playerAcceleration,
+        playerDeceleration: player.playerDeceleration,
+        timeScale: player.timeScale,
+        minCamDistance: toBasePlayerValue(player.cam.minDist),
+        maxCamDistance: toBasePlayerValue(player.cam.maxDist),
+        camLookAtHeightRatio: player.cam.lookAtHeightRatio,
+        enableOverShoulderView: player.enableOverShoulderView,
+        camOverShoulderOffsetRatio: player.cam.overShoulderOffsetRatio,
+        enableSpringCamera: player.cam.enableSpringCamera,
+        springCameraTime: player.cam.springCameraTime,
+        thirdMouseMode: player.cam.mouseMode,
+        enableZoom: player.cam.zoomEnabled,
+        footIKEnabled: options.enabled,
+        footIKDebug: options.debug,
+        predictivePlacement: options.predictivePlacement,
         pelvisOffset: 0,
         leftFootPhase: "",
         leftFootLand: "--",
@@ -1573,26 +1567,26 @@ function createDebugPanel() {
         rightFootLand: "--",
         rightFootIKWeight: 0,
         rightPrediction: "disabled",
-        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 50, 0),
-        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
-        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
-        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
-        plantedHeightSpeed: roundedValue(footIKOptions.plantedHeightSpeed, 200, 0),
-        penetrationLiftSpeed: roundedValue(footIKOptions.penetrationLiftSpeed, 200, 0),
-        soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
-        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
-        soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
-        soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
-        maxPredictionClearance: roundedValue(footIKOptions.maxPredictionClearance, 50, 0),
+        maxPelvisRaise: options.maxPelvisRaise,
+        maxPelvisDrop: options.maxPelvisDrop,
+        maxFootRaise: options.maxFootRaise,
+        maxFootDrop: options.maxFootDrop,
+        plantedHeightSpeed: options.plantedHeightSpeed,
+        penetrationLiftSpeed: options.penetrationLiftSpeed,
+        soleHalfWidth: options.soleHalfWidth,
+        soleToeExtend: options.soleToeExtend,
+        soleHeelExtend: options.soleHeelExtend,
+        soleSkinThickness: options.soleSkinThickness,
+        maxPredictionClearance: options.maxPredictionClearance,
         maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
     };
     footIKDebugParams = params;
 
     const applyFootIKOptions = (patch) => {
-        footIK?.configure(patch);
+        footIK.configure(patch);
     };
 
-    footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
+    footIK.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
 
     const gui = new GUI({ title: "Showcase Controls", width: 320 });
     Object.assign(gui.domElement.style, {
@@ -1680,14 +1674,14 @@ function createDebugPanel() {
 
     const footIKFolder = characterFolder.addFolder("Foot IK");
     footIKFolder.add(params, "footIKEnabled").name("Enabled").onChange((value) => {
-        footIK?.setEnabled(value);
-        footIK?.setDebugEnabled(value && params.footIKDebug);
+        footIK.setEnabled(value);
+        footIK.setDebugEnabled(value && params.footIKDebug);
     });
     footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
-        footIK?.setDebugEnabled(value && params.footIKEnabled);
+        footIK.setDebugEnabled(value && params.footIKEnabled);
     });
     footIKFolder.add(params, "predictivePlacement").name("Predictive Placement").onChange((value) => {
-        footIK?.configure({ predictivePlacement: value });
+        footIK.configure({ predictivePlacement: value });
     });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
@@ -1825,7 +1819,7 @@ function animate(timestamp) {
 
 // 更新 Foot IK 运行状态只读字段。
 function updateFootIKDebugPanel() {
-    if (!footIKDebugParams || !footIK) return;
+    if (!footIK) return;
     footIKDebugParams.pelvisOffset = footIK.getPelvisOffset();
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));

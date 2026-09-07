@@ -196,23 +196,19 @@ async function init() {
 
 // 创建调试面板
 function createDebugPanel() {
-    const footIKOptions = footIK?.getOptions() ?? {};
-    const roundedValue = (value, fallback, decimals = 1) => {
-        const factor = 10 ** decimals;
-        return Math.round((value ?? fallback) * factor) / factor;
-    };
+    const options = footIK.getOptions();
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
-        footIKEnabled: footIKOptions.enabled ?? true,
-        footIKDebug: footIKOptions.debug ?? false,
-        predictivePlacement: footIKOptions.predictivePlacement ?? false,
+        footIKEnabled: options.enabled,
+        footIKDebug: options.debug,
+        predictivePlacement: options.predictivePlacement,
         pelvisOffset: 0,
         writePelvisOffset: 0,
         clearPelvisOffset: () => {
             params.writePelvisOffset = 0;
-            writePelvisOffsetController?.updateDisplay();
-            footIK?.clearPelvisOffset();
+            writePelvisOffsetController.updateDisplay();
+            footIK.clearPelvisOffset();
         },
         leftFootPhase: "",
         leftFootLand: "--",
@@ -222,25 +218,25 @@ function createDebugPanel() {
         rightFootLand: "--",
         rightFootIKWeight: 0,
         rightPrediction: "disabled",
-        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 50, 0),
-        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
-        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
-        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
-        plantedHeightSpeed: roundedValue(footIKOptions.plantedHeightSpeed, 200, 0),
-        penetrationLiftSpeed: roundedValue(footIKOptions.penetrationLiftSpeed, 200, 0),
-        soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
-        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
-        soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
-        soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
-        maxPredictionClearance: roundedValue(footIKOptions.maxPredictionClearance, 50, 0),
+        maxPelvisRaise: options.maxPelvisRaise,
+        maxPelvisDrop: options.maxPelvisDrop,
+        maxFootRaise: options.maxFootRaise,
+        maxFootDrop: options.maxFootDrop,
+        plantedHeightSpeed: options.plantedHeightSpeed,
+        penetrationLiftSpeed: options.penetrationLiftSpeed,
+        soleHalfWidth: options.soleHalfWidth,
+        soleToeExtend: options.soleToeExtend,
+        soleHeelExtend: options.soleHeelExtend,
+        soleSkinThickness: options.soleSkinThickness,
+        maxPredictionClearance: options.maxPredictionClearance,
     };
     footIKDebugParams = params;
 
     const applyFootIKOptions = (patch) => {
-        footIK?.configure(patch);
+        footIK.configure(patch);
     };
 
-    footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
+    footIK.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
 
     gui = new GUI({ title: "Foot IK Controls", width: 320 });
     Object.assign(gui.domElement.style, {
@@ -254,23 +250,23 @@ function createDebugPanel() {
 
     const collisionFolder = gui.addFolder("Collision Debug");
     collisionFolder.add(params, "colliderDebug").name("Static / Kinematic Meshes").onChange((value) => {
-        player?.setColliderDebug(value);
+        player.setColliderDebug(value);
     });
     collisionFolder.add(params, "playerCapsuleDebug").name("Capsule").onChange((value) => {
-        player?.setPlayerCapsuleDebug?.(value);
+        player.setPlayerCapsuleDebug(value);
     });
     collisionFolder.open();
 
     const footIKFolder = gui.addFolder("Foot IK");
     footIKFolder.add(params, "footIKEnabled").name("Enabled").onChange((value) => {
-        footIK?.setEnabled(value);
-        footIK?.setDebugEnabled(value && params.footIKDebug);
+        footIK.setEnabled(value);
+        footIK.setDebugEnabled(value && params.footIKDebug);
     });
     footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
-        footIK?.setDebugEnabled(value && params.footIKEnabled);
+        footIK.setDebugEnabled(value && params.footIKEnabled);
     });
     footIKFolder.add(params, "predictivePlacement").name("Predictive Placement").onChange((value) => {
-        footIK?.configure({ predictivePlacement: value });
+        footIK.configure({ predictivePlacement: value });
     });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
@@ -296,7 +292,7 @@ function createDebugPanel() {
         .name("Write Offset")
         .decimals(1)
         .onChange((value) => {
-            footIK?.setPelvisOffset(value);
+            footIK.setPelvisOffset(value);
         });
     pelvisFolder.add(params, "clearPelvisOffset").name("Clear Offset");
     pelvisFolder.close();
@@ -527,7 +523,7 @@ function animate() {
 
 // 更新 Foot IK 运行状态只读字段。
 function updateFootIKDebugPanel() {
-    if (!footIKDebugParams || !footIK) return;
+    if (!footIK) return;
     footIKDebugParams.pelvisOffset = footIK.getPelvisOffset();
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
