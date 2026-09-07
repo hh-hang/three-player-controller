@@ -177,8 +177,8 @@ async function init() {
         soleHalfWidth: 7,
         soleToeExtend: 7,
         soleSkinThickness: 1.6,
-        plantedHeightDamp: 10,
-        penetrationLiftDamp: 10,
+        plantedHeightSpeed: 200,
+        penetrationLiftSpeed: 200,
         predictivePlacement: true,
     });
     player.use(footIK);
@@ -226,8 +226,8 @@ function createDebugPanel() {
         maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
         maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
         maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
-        plantedHeightDamp: roundedValue(footIKOptions.plantedHeightDamp, 0, 1),
-        penetrationLiftDamp: roundedValue(footIKOptions.penetrationLiftDamp, 0, 1),
+        plantedHeightSpeed: roundedValue(footIKOptions.plantedHeightSpeed, 200, 0),
+        penetrationLiftSpeed: roundedValue(footIKOptions.penetrationLiftSpeed, 200, 0),
         soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
         soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
@@ -308,11 +308,11 @@ function createDebugPanel() {
     footReachFolder.add(params, "maxFootDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => {
         applyFootIKOptions({ maxFootDrop: value });
     });
-    footReachFolder.add(params, "plantedHeightDamp", 0, 40, 0.1).name("Planted Damp").decimals(1).onChange((value) => {
-        applyFootIKOptions({ plantedHeightDamp: value });
+    footReachFolder.add(params, "plantedHeightSpeed", 50, 500, 1).name("Planted Speed").decimals(0).onChange((value) => {
+        applyFootIKOptions({ plantedHeightSpeed: value });
     });
-    footReachFolder.add(params, "penetrationLiftDamp", 0, 40, 0.1).name("Penetration Damp").decimals(1).onChange((value) => {
-        applyFootIKOptions({ penetrationLiftDamp: value });
+    footReachFolder.add(params, "penetrationLiftSpeed", 50, 500, 1).name("Penetration Speed").decimals(0).onChange((value) => {
+        applyFootIKOptions({ penetrationLiftSpeed: value });
     });
     footReachFolder.close();
 

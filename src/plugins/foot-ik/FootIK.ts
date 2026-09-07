@@ -115,8 +115,8 @@ export class FootIK {
     private maxPelvisRaise = 50;
     private maxFootRaise = 50;
     private maxFootDrop = 50;
-    private plantedHeightDamp = 0;
-    private penetrationLiftDamp = 0;
+    private plantedHeightSpeed = Infinity;
+    private penetrationLiftSpeed = Infinity;
     private straightPoleWeights: Record<FootIKSide, number> = { left: 0, right: 0 };
     private soleHalfWidth = 7;
     private soleToeExtend = 7;
@@ -137,7 +137,7 @@ export class FootIK {
     private predictionMinNormalY: number;
     private swingClearance = 8;
     private maxPredictionClearance = 50;
-    // 当前距离字段已烘焙进去的 scale；改 scale 时按 ratio 连乘。
+    // 当前距离和速度字段已烘焙进去的 scale；改 scale 时按 ratio 连乘。
     private appliedScale = 1;
 
     private footAlignWeight: number;
@@ -222,13 +222,13 @@ export class FootIK {
         this.enabled = options.enabled ?? true;
         this.debug = options.debug ?? false;
 
-        // 距离类参数先写入 scale=1 基准值，挂载后按 playerModelConfig.scale 连乘。
+        // 距离和速度类参数先写入 scale=1 基准值，挂载后按 playerModelConfig.scale 连乘。
         this.maxPelvisDrop = Math.max(0, options.maxPelvisDrop ?? this.maxPelvisDrop);
         this.maxPelvisRaise = Math.max(0, options.maxPelvisRaise ?? this.maxPelvisRaise);
         this.maxFootRaise = Math.max(0, options.maxFootRaise ?? this.maxFootRaise);
         this.maxFootDrop = Math.max(0, options.maxFootDrop ?? this.maxFootDrop);
-        this.plantedHeightDamp = Math.max(0, options.plantedHeightDamp ?? this.plantedHeightDamp);
-        this.penetrationLiftDamp = Math.max(0, options.penetrationLiftDamp ?? this.penetrationLiftDamp);
+        this.plantedHeightSpeed = Math.max(0, options.plantedHeightSpeed ?? this.plantedHeightSpeed);
+        this.penetrationLiftSpeed = Math.max(0, options.penetrationLiftSpeed ?? this.penetrationLiftSpeed);
         this.soleHalfWidth = Math.max(0, options.soleHalfWidth ?? this.soleHalfWidth);
         this.soleToeExtend = Math.max(0, options.soleToeExtend ?? this.soleToeExtend);
         this.soleHeelExtend = Math.max(0, options.soleHeelExtend ?? this.soleHeelExtend);
@@ -255,7 +255,7 @@ export class FootIK {
         this.minKneeBend = Math.min(configuredMinBend, configuredMaxBend);
         this.maxKneeBend = Math.max(configuredMinBend, configuredMaxBend);
         this.pelvisKneeBend = MathUtils.clamp(
-            options.pelvisKneeBend ?? MathUtils.degToRad(15),
+            options.pelvisKneeBend ?? MathUtils.degToRad(0),
             this.minKneeBend,
             this.maxKneeBend,
         );
@@ -372,6 +372,8 @@ export class FootIK {
         this.maxPelvisRaise *= ratio;
         this.maxFootRaise *= ratio;
         this.maxFootDrop *= ratio;
+        this.plantedHeightSpeed *= ratio;
+        this.penetrationLiftSpeed *= ratio;
         this.soleHalfWidth *= ratio;
         this.soleToeExtend *= ratio;
         this.soleHeelExtend *= ratio;
@@ -757,25 +759,25 @@ export class FootIK {
             leg.weight = 0;
         }
 
-        // 支撑脚按参数平滑追贴地高度；摆动脚保留上一帧修正并渐出。
-        // 摆动脚陷入地面时平滑上抬高度。
+        // 支撑脚按参数追贴地高度；摆动脚保留上一帧修正并渐出。
+        // 摆动脚陷入地面时按参数上抬高度。
         if (leg.planted) {
-            this.dampFootHeightAlongUp(
+            this.moveFootHeightAlongUp(
                 leg,
                 footWorld,
                 targetOffset,
                 previousWeight,
                 delta,
-                this.getSpeedLimitedDamp(this.plantedHeightDamp),
+                this.getHeightSpeed(this.plantedHeightSpeed),
             );
         } else if (leg.movePenetrating) {
-            this.dampFootHeightAlongUp(
+            this.moveFootHeightAlongUp(
                 leg,
                 footWorld,
                 targetOffset,
                 previousWeight,
                 delta,
-                this.getSpeedLimitedDamp(this.penetrationLiftDamp),
+                this.getHeightSpeed(this.penetrationLiftSpeed),
             );
         } else if (!startedSwing) {
             leg.offsetY = MathUtils.damp(leg.offsetY, 0, 10, delta);
@@ -788,26 +790,25 @@ export class FootIK {
         this.updateFootDebug(leg, hit.point);
     }
 
-    /** 当前是跑步动画时高度阻尼直接为 0。 */
-    private getSpeedLimitedDamp(damp: number): number {
-        if (damp <= 0) return 0;
+    /** 当前是跑步动画时高度速度不限制。 */
+    private getHeightSpeed(speed: number): number {
         const clipName = this.player?.animation.state?.getClip().name ?? "";
         const runAnim = this.player?.playerModelConfig?.runAnim;
-        return runAnim && clipName === runAnim ? 0 : damp;
+        return runAnim && clipName === runAnim ? Infinity : speed;
     }
 
-    /** 从上一帧世界高度沿 up 阻尼到目标偏移；XZ 跟当前动画脚。 */
-    private dampFootHeightAlongUp(
+    /** 从上一帧世界高度沿 up 限速移动到目标偏移；XZ 跟当前动画脚。 */
+    private moveFootHeightAlongUp(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
         wantedOffset: number,
         previousWeight: number,
         delta: number,
-        damp: number,
+        speed: number,
     ): void {
         const footAlongUp = footWorld.dot(this.up);
         const wantedAlongUp = footAlongUp + wantedOffset;
-        if (damp <= 0) {
+        if (!Number.isFinite(speed)) {
             leg.offsetY = wantedOffset;
             leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
             return;
@@ -818,16 +819,12 @@ export class FootIK {
         const previousAlongUp = hasPrevious
             ? leg.smoothedTarget.dot(this.up)
             : footAlongUp;
-        let dampedAlongUp = MathUtils.damp(
-            previousAlongUp,
-            wantedAlongUp,
-            damp,
-            delta,
+        const movedAlongUp = previousAlongUp + MathUtils.clamp(
+            wantedAlongUp - previousAlongUp,
+            -speed * delta,
+            speed * delta,
         );
-        if (Math.abs(dampedAlongUp - wantedAlongUp) < this.snapEpsilon) {
-            dampedAlongUp = wantedAlongUp;
-        }
-        leg.offsetY = dampedAlongUp - footAlongUp;
+        leg.offsetY = movedAlongUp - footAlongUp;
         leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
     }
 
@@ -1961,7 +1958,7 @@ export class FootIK {
             leg.predictive.trajectoryCurrentTarget.copy(leg.smoothedTarget);
         } else if (leg.planted && leg.hasPelvisTarget) {
             // 落地目标用未裁剪的支撑面；髋更新后再裁到当前腿长，够不着时停在伸展球面上。
-            if (this.getSpeedLimitedDamp(this.plantedHeightDamp) <= 0) {
+            if (!Number.isFinite(this.getHeightSpeed(this.plantedHeightSpeed))) {
                 leg.smoothedTarget.copy(leg.pelvisTarget);
             }
             this.clampPredictiveTargetToReach(leg, leg.smoothedTarget);
@@ -2162,7 +2159,7 @@ export class FootIK {
         this.setDebugVisible(enabled);
     }
 
-    /** 读取当前可调配置（不含 skeleton）。距离类参数返回 scale=1 基准值。 */
+    /** 读取当前可调配置（不含 skeleton）。距离和速度类参数返回 scale=1 基准值。 */
     getOptions(): Required<Omit<FootIKOptions, "skeleton">> {
         return {
             enabled: this.enabled,
@@ -2171,8 +2168,8 @@ export class FootIK {
             maxPelvisRaise: this.toBaseDistance(this.maxPelvisRaise),
             maxFootRaise: this.toBaseDistance(this.maxFootRaise),
             maxFootDrop: this.toBaseDistance(this.maxFootDrop),
-            plantedHeightDamp: this.plantedHeightDamp,
-            penetrationLiftDamp: this.penetrationLiftDamp,
+            plantedHeightSpeed: this.toBaseDistance(this.plantedHeightSpeed),
+            penetrationLiftSpeed: this.toBaseDistance(this.penetrationLiftSpeed),
             soleHalfWidth: this.toBaseDistance(this.soleHalfWidth),
             soleToeExtend: this.toBaseDistance(this.soleToeExtend),
             soleHeelExtend: this.toBaseDistance(this.soleHeelExtend),
@@ -2200,7 +2197,7 @@ export class FootIK {
 
     /**
      * 运行时更新部分配置。
-     * 距离类参数传入 scale=1 基准值，内部会乘以当前 playerModelConfig.scale。
+     * 距离和速度类参数传入 scale=1 基准值，内部会乘以当前 playerModelConfig.scale。
      * sole 尺寸变化会重建本地采样点，脚步相位相关参数变化会重建相位库。
      */
     configure(options: Partial<FootIKOptions>): void {
@@ -2231,11 +2228,11 @@ export class FootIK {
         if (options.maxFootDrop !== undefined) {
             this.maxFootDrop = this.scaleDistance(options.maxFootDrop);
         }
-        if (options.plantedHeightDamp !== undefined) {
-            this.plantedHeightDamp = Math.max(0, options.plantedHeightDamp);
+        if (options.plantedHeightSpeed !== undefined) {
+            this.plantedHeightSpeed = this.scaleDistance(options.plantedHeightSpeed);
         }
-        if (options.penetrationLiftDamp !== undefined) {
-            this.penetrationLiftDamp = Math.max(0, options.penetrationLiftDamp);
+        if (options.penetrationLiftSpeed !== undefined) {
+            this.penetrationLiftSpeed = this.scaleDistance(options.penetrationLiftSpeed);
         }
         if (options.soleHalfWidth !== undefined) {
             this.soleHalfWidth = this.scaleDistance(options.soleHalfWidth);
