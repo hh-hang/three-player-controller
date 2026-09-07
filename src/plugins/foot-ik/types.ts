@@ -164,6 +164,8 @@ export type FootIKOptions = {
     maxKneeBend?: number;
     /** 骨盆可达性计算保留的膝盖弯曲角，单位为弧度，默认 15°。 */
     pelvisKneeBend?: number;
+    /** 移动时是否使用直 pole（膝盖朝角色前方平面），默认 false，关闭则保留动画 pole。 */
+    straightPoleEnabled?: boolean;
     /** 移动时脚底穿透触发阈值基准值（按 scale 缩放），默认 0.1。 */
     moveLiftThreshold?: number;
     /** 单个移动动画的脚步相位采样数，默认 96。 */
@@ -178,8 +180,8 @@ export type FootIKOptions = {
     predictivePlacement?: boolean;
     /** 最长预测时间，单位为秒，默认 0.45。 */
     predictionHorizon?: number;
-    /** 预测地面候选重新探测间隔，单位为秒，默认 0.05。 */
-    predictionProbeInterval?: number;
+    /** 预测地面候选重新探测间隔，单位为帧，默认 10；0 表示每帧探测。 */
+    predictionProbeFrames?: number;
     /** 预测落脚候选相对动画落点的搜索半径基准值（按 scale 缩放），默认 20。 */
     predictionSearchRadius?: number;
     /** 允许预测目标偏离动画落点的最大水平距离基准值（按 scale 缩放），默认 45。 */
@@ -201,43 +203,67 @@ export type PredictiveFootState = {
     mode: PredictiveFootMode;
     /** 脚骨 IK 目标；鞋底贴在支撑面上时脚骨应到达的位置。 */
     landingTarget: Vector3;
+    /** 预测落点支撑面的世界空间单位法线。 */
     landingNormal: Vector3;
     /** 鞋底四点共面合并后的地面接触点，与 landingTarget 不是同一点。 */
     supportPoint: Vector3;
     /** 动画预计落地时的脚骨位置，已加上剩余落地时间的水平速度。 */
     animatedLanding: Vector3;
+    /** 动画预计落地时的脚骨世界旋转。 */
     animatedLandingRotation: Quaternion;
     /** 启用预测时当前脚相对动画脚的起点残差，随 warp 渐隐。 */
     trajectoryStartOffset: Vector3;
     /** 上一帧实际输出的预测脚目标，重规划时用来保持世界空间连续。 */
     trajectoryCurrentTarget: Vector3;
+    /** 预测线路启用瞬间的摆腿进度，用于把剩余摆腿重映射到 0 到 1。 */
     trajectoryStartProgress: number;
+    /** 当前摆腿进度；只增不减，供 warp 和末段锁面使用。 */
     trajectoryProgress: number;
+    /** 摆腿途中为越过凸起追加的净空高度。 */
     trajectoryClearance: number;
     /** 由地形需求在进入/退出阈值之间平滑得到的预测 IK 权重。 */
     predictionWeight: number;
     /** 落点相对动画中心做了水平偏移时为 true；中心落点落地后交还反应式 IK。 */
     usesOffsetLanding: boolean;
+    /** 上一支撑偏移落点相对新摆腿动画脚的残差，前段逐渐还给动画。 */
     releaseOffset: Vector3;
+    /** 开始释放残差时的摆腿进度。 */
     releaseStartProgress: number;
+    /** 本摆腿前段是否仍在释放上一支撑残差。 */
     releaseActive: boolean;
     /** 落点所在网格；移动平台用局部锚点把目标跟到世界空间。 */
     supportObject: Object3D | null;
+    /** landingTarget 在 supportObject 局部空间中的锚点。 */
     supportLocalTarget: Vector3;
+    /** supportPoint 在 supportObject 局部空间中的锚点。 */
     supportLocalPoint: Vector3;
+    /** landingNormal 在 supportObject 局部空间中的方向。 */
     supportLocalNormal: Vector3;
+    /** 距上次地面探测的帧数；Infinity 表示本摆腿尚未探测。 */
     probeElapsed: number;
+    /** 当前预测候选评分；越小越好，无有效候选时为 Infinity。 */
     score: number;
+    /** 调试：落点高出胶囊支撑面的高度。 */
     debugPlaneLift: number;
+    /** 调试：摆腿路径上高出支撑面的最大凸起。 */
     debugSwingLift: number;
+    /** 调试：规划出的摆腿线路采样点。 */
     debugTrajectory: Vector3[];
+    /** 调试：当前是否绘制预测摆腿线路。 */
     debugTrajectoryVisible: boolean;
+    /** 调试：当前是否绘制预测支撑面。 */
     debugSupportVisible: boolean;
+    /** 调试：预测支撑面四角的世界坐标。 */
     debugSupportCorners: Vector3[];
+    /** 调试：本帧评估过的落点候选。 */
     debugCandidates: Array<{
+        /** 候选支撑点的世界坐标。 */
         point: Vector3;
+        /** 本帧是否评估过该候选。 */
         evaluated: boolean;
+        /** 该候选是否通过抬降和腿长约束。 */
         valid: boolean;
+        /** 是否为最终采用的候选。 */
         selected: boolean;
     }>;
 };

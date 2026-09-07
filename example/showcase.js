@@ -350,6 +350,7 @@ async function init() {
         plantedHeightSpeed: 200,
         penetrationLiftSpeed: 200,
         predictivePlacement: true,
+        straightPoleEnabled: true,
         skeleton: {
             hips: "pelvis",
             legs: {
@@ -1558,6 +1559,7 @@ function createDebugPanel() {
         footIKEnabled: options.enabled,
         footIKDebug: options.debug,
         predictivePlacement: options.predictivePlacement,
+        straightPoleEnabled: options.straightPoleEnabled,
         pelvisOffset: 0,
         leftFootPhase: "",
         leftFootLand: "--",
@@ -1682,6 +1684,9 @@ function createDebugPanel() {
     });
     footIKFolder.add(params, "predictivePlacement").name("Predictive Placement").onChange((value) => {
         footIK.configure({ predictivePlacement: value });
+    });
+    footIKFolder.add(params, "straightPoleEnabled").name("Straight Pole").onChange((value) => {
+        footIK.configure({ straightPoleEnabled: value });
     });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");

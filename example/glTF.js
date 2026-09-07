@@ -322,6 +322,7 @@ function attachFootIK() {
         soleToeExtend: p?.soleToeExtend ?? 7,
         soleHeelExtend: p?.soleHeelExtend ?? 3,
         soleSkinThickness: p?.soleSkinThickness ?? 1.6,
+        straightPoleEnabled: p?.straightPoleEnabled ?? true,
     });
     player.use(footIK);
     if (p) footIKDebugParams = p;
@@ -912,6 +913,7 @@ function initGUI() {
         enableZoom: player.cam.zoomEnabled,
         footIKEnabled: options.enabled,
         footIKDebug: options.debug,
+        straightPoleEnabled: options.straightPoleEnabled,
         leftFootPhase: "",
         leftFootLand: "--",
         leftFootIKWeight: 0,
@@ -1026,6 +1028,9 @@ function initGUI() {
     });
     footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
         footIK?.setDebugEnabled(value && params.footIKEnabled);
+    });
+    footIKFolder.add(params, "straightPoleEnabled").name("Straight Pole").onChange((value) => {
+        applyFootIKOptions({ straightPoleEnabled: value });
     });
 
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
