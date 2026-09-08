@@ -43,6 +43,8 @@ export type SolveTwoBoneIKOptions = {
      * 角色的右方向作为法线时，膝盖只能在角色的前后平面内弯曲。
      */
     kneePlaneNormal?: Vector3;
+    /** kneePlaneNormal 对原动画 pole 的覆盖权重，范围 0 到 1，默认 1。 */
+    kneePlaneWeight?: number;
 };
 
 // 创建双骨骼 IK 解算复用对象，避免每帧重复分配临时变量。
@@ -113,8 +115,12 @@ export function solveTwoBoneIK(
         leg,
         restPole,
         options.kneePlaneNormal,
+        MathUtils.clamp(options.kneePlaneWeight ?? 1, 0, 1),
         chainDir,
         scratch.v7,
+        scratch.v4,
+        scratch.q1,
+        scratch.identityQ,
     );
     const along = (upperLen * upperLen - lowerLen * lowerLen + clampedDistance * clampedDistance) / (2 * clampedDistance);
     const height = Math.sqrt(Math.max(0, upperLen * upperLen - along * along));
@@ -152,12 +158,26 @@ function getStablePole(
     leg: TwoBoneIKLeg,
     restPole: Vector3,
     kneePlaneNormal: Vector3 | undefined,
+    kneePlaneWeight: number,
     chainDir: Vector3,
     target: Vector3,
+    straightPole: Vector3,
+    poleRotation: Quaternion,
+    identityRotation: Quaternion,
 ): Vector3 {
-    if (kneePlaneNormal) {
-        target.crossVectors(chainDir, kneePlaneNormal);
-        if (normalizePole(target)) {
+    const hasRestPole = projectPoleToChainPlane(restPole, chainDir, target);
+
+    if (kneePlaneNormal && kneePlaneWeight > 0) {
+        straightPole.crossVectors(chainDir, kneePlaneNormal);
+        if (normalizePole(straightPole)) {
+            if (hasRestPole && kneePlaneWeight < 1) {
+                poleRotation
+                    .setFromUnitVectors(target, straightPole)
+                    .slerp(identityRotation, 1 - kneePlaneWeight);
+                target.applyQuaternion(poleRotation).normalize();
+            } else {
+                target.copy(straightPole);
+            }
             rememberPole(leg, target);
             return target;
         }
@@ -172,7 +192,8 @@ function getStablePole(
     }
 
     // 静止模式直接走这里，完整保留 idle 动画 pole，不读取上一帧的历史结果。
-    if (projectPoleToChainPlane(restPole, chainDir, target)) {
+    if (hasRestPole) {
+        projectPoleToChainPlane(restPole, chainDir, target);
         rememberPole(leg, target);
         return target;
     }

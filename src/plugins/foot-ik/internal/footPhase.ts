@@ -1,6 +1,7 @@
 import {
     AnimationMixer,
     MathUtils,
+    Quaternion,
     Vector3,
     type AnimationClip,
     type Object3D,
@@ -14,7 +15,9 @@ import type {
     FootPhaseContactRun,
     FootPhaseDatabase,
     FootPhaseFrameSample,
+    FootPhaseLanding,
     FootPhaseOptions,
+    FootPhasePoseSample,
     FootPhaseRuntime,
     FootPhaseRuntimeState,
     FootPhaseSamplePoint,
@@ -24,6 +27,8 @@ import type {
 
 const tmpFoot = new Vector3();
 const tmpToe = new Vector3();
+const tmpFootRotation = new Quaternion();
+const tmpModelRotation = new Quaternion();
 
 // 创建单脚相位的运行时默认状态。
 export function createFootPhaseRuntimeState(): FootPhaseRuntimeState {
@@ -31,6 +36,7 @@ export function createFootPhaseRuntimeState(): FootPhaseRuntimeState {
         planted: false,
         progress: 0,
         timeToLand: Infinity,
+        nextLanding: null,
     };
 }
 
@@ -151,17 +157,51 @@ function sampleFootPhaseClip(
     };
 }
 
-// 采样单只脚在动画中的高度和水平位置。
+// 采样单只脚在动画中的高度、水平位置和相对模型旋转。
 function getFootPhaseSample(model: Object3D, leg: ReadyFootIKLeg): FootPhaseSamplePoint {
     const foot = leg.foot.getWorldPosition(tmpFoot);
     const toeY = leg.toe ? leg.toe.getWorldPosition(tmpToe).y : foot.y;
     const contactY = Math.min(foot.y, toeY);
+    const footWorldRotation = leg.foot.getWorldQuaternion(tmpFootRotation);
+    const localRotation = model
+        .getWorldQuaternion(tmpModelRotation)
+        .invert()
+        .multiply(footWorldRotation)
+        .clone();
     model.worldToLocal(foot);
     return {
         y: contactY,
         x: foot.x,
+        localY: foot.y,
         z: foot.z,
+        localRotation,
     };
+}
+
+// 按循环相位插值离线动画中的脚骨局部位姿。
+export function sampleFootPhasePose(
+    sideData: FootPhaseSideData,
+    normalizedTime: number,
+    position: Vector3,
+    rotation: Quaternion,
+): boolean {
+    const poses = sideData.poses;
+    if (poses.length === 0) return false;
+
+    const wrappedTime = ((normalizedTime % 1) + 1) % 1;
+    const sample = wrappedTime * poses.length;
+    const fromIndex = Math.floor(sample) % poses.length;
+    const toIndex = (fromIndex + 1) % poses.length;
+    const alpha = sample - Math.floor(sample);
+    position.lerpVectors(
+        poses[fromIndex].localPosition,
+        poses[toIndex].localPosition,
+        alpha,
+    );
+    rotation
+        .copy(poses[fromIndex].localRotation)
+        .slerp(poses[toIndex].localRotation, alpha);
+    return true;
 }
 
 // 分析单只脚的落地相位。
@@ -179,11 +219,27 @@ function analyzeFootPhaseSide(
     const contacts = keepMainFootContactRun(filterShortFootContacts(speedContacts, options.minContactRatio));
     const land: number[] = [];
     const lift: number[] = [];
+    const landings: FootPhaseLanding[] = [];
+    const poses: FootPhasePoseSample[] = samples.map(sample => {
+        const point = sample[side];
+        return {
+            localPosition: new Vector3(point.x, point.localY, point.z),
+            localRotation: point.localRotation.clone(),
+        };
+    });
 
     for (let i = 0; i < contacts.length; i++) {
         const prev = contacts[(i - 1 + contacts.length) % contacts.length];
         const current = contacts[i];
-        if (!prev && current) land.push(samples[i].time);
+        if (!prev && current) {
+            land.push(samples[i].time);
+            const point = samples[i][side];
+            landings.push({
+                phase: samples[i].time,
+                localPosition: new Vector3(point.x, point.localY, point.z),
+                localRotation: point.localRotation.clone(),
+            });
+        }
         if (prev && !current) lift.push(samples[i].time);
     }
 
@@ -191,6 +247,8 @@ function analyzeFootPhaseSide(
         contacts,
         land,
         lift,
+        landings,
+        poses,
     };
 }
 
@@ -300,7 +358,8 @@ function sampleFootPhaseRuntimeSide(
 
     const sampleIndex = Math.floor(normalizedTime * sampleCount) % sampleCount;
     const planted = !!sideData.contacts[sampleIndex];
-    const nextLand = nextPhaseEvent(sideData.land, normalizedTime);
+    const nextLanding = nextLandingEvent(sideData.landings, normalizedTime);
+    const nextLand = nextLanding?.phase ?? null;
     const prevLift = prevPhaseEvent(sideData.lift, normalizedTime);
     const swingSpan = wrapPhaseDistance(prevLift, nextLand) || 1;
     const swingDone = wrapPhaseDistance(prevLift, normalizedTime);
@@ -308,19 +367,25 @@ function sampleFootPhaseRuntimeSide(
     return {
         planted,
         progress: planted ? 1 : MathUtils.clamp(swingDone / swingSpan, 0, 1),
-        timeToLand: wrapPhaseDistance(normalizedTime, nextLand) * duration,
+        timeToLand: nextLand === null
+            ? Infinity
+            : wrapPhaseDistance(normalizedTime, nextLand) * duration,
+        nextLanding,
     };
 }
 
-// 查找循环时间轴上的下一个事件。
-function nextPhaseEvent(events: readonly number[], normalizedTime: number): number | null {
+/** 查找循环动画时间轴上的下一次落脚事件。 */
+function nextLandingEvent(
+    events: readonly FootPhaseLanding[],
+    normalizedTime: number,
+): FootPhaseLanding | null {
     if (!events.length) return null;
     let best = events[0];
     let bestDistance = Infinity;
-    for (const eventTime of events) {
-        const distance = wrapPhaseDistance(normalizedTime, eventTime);
+    for (const event of events) {
+        const distance = wrapPhaseDistance(normalizedTime, event.phase);
         if (distance < bestDistance) {
-            best = eventTime;
+            best = event;
             bestDistance = distance;
         }
     }
