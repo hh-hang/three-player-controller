@@ -4,6 +4,7 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>three-player-controller</title>
+        <link rel="stylesheet" href="./styles/common.css" />
         <style>
             html,
             body {
@@ -17,147 +18,54 @@
                 position: absolute;
                 background: transparent;
             }
-
-            .hud {
-                position: fixed;
-                left: 12px;
-                top: 12px;
-                z-index: 9999;
-                color: #fff;
-                background: rgba(0, 0, 0, 0.45);
-                padding: 10px 12px;
-                border-radius: 8px;
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-                font-size: 16px;
-                line-height: 1.3;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-                backdrop-filter: blur(4px);
-            }
-
-            .hud .row {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 6px;
-            }
-            .hud .row:last-child {
-                margin-bottom: 0;
-            }
-
-            kbd {
-                display: inline-block;
-                min-width: 20px;
-                padding: 4px 7px;
-                border-radius: 6px;
-                color: #111;
-                background: linear-gradient(#f6f6f6, #e3e3e3);
-                border: 1px solid rgba(0, 0, 0, 0.15);
-                border-bottom-width: 2px;
-                font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-                text-align: center;
-                box-shadow:
-                    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-                    0 2px 4px rgba(0, 0, 0, 0.25);
-            }
-
-            .hint-text {
-                min-width: 96px;
-                color: #e6eef6;
-                font-size: 13px;
-            }
-            .hint-group {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            .model-credit {
-                position: fixed;
-                top: 10px;
-                left: 50%;
-                transform: translateX(-50%);
-                z-index: 9999;
-                font-size: 16px;
-                color: #e6eef6;
-                background: rgba(0, 0, 0, 0.35);
-                padding: 6px 12px;
-                border-radius: 999px;
-                backdrop-filter: blur(4px);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-                font-family:
-                    system-ui,
-                    -apple-system,
-                    "Segoe UI",
-                    Roboto,
-                    Arial;
-            }
-
-            .model-credit a {
-                color: #6ecbff;
-                text-decoration: none;
-            }
-
-            .model-credit a:hover {
-                text-decoration: underline;
-            }
-
-            .source {
-                position: fixed;
-                bottom: 16px;
-                right: 16px;
-                padding: 12px;
-                border-radius: 50%;
-                margin-bottom: 0px;
-                background-color: #fff;
-                opacity: 0.9;
-                z-index: 999;
-                box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
-
-                img {
-                    display: block;
-                    width: 24px;
-                }
-            }
-
-            @media (hover: none) and (pointer: coarse), (max-width: 768px) {
-                .hud,
-                .source {
-                    display: none !important;
-                }
-            }
         </style>
-        <script src="./loader.js"></script>
+        <script src="./loader.js" data-demo="3DGS Scene"></script>
     </head>
     <body>
         <div id="container"></div>
 
         <div class="hud" role="note" aria-label="Controls">
-            <div class="row hint-group">
-                <span class="hint-text">Movement:</span>
-                <kbd>W</kbd>
-                <kbd>A</kbd>
-                <kbd>S</kbd>
-                <kbd>D</kbd>
+            <div class="hint-move">
+                <div class="hint-cluster">
+                    <div class="wasd">
+                        <kbd class="wasd-w">W</kbd>
+                        <kbd class="wasd-a">A</kbd>
+                        <kbd class="wasd-s">S</kbd>
+                        <kbd class="wasd-d">D</kbd>
+                    </div>
+                    <span class="hint-text">Move</span>
+                </div>
+                <div class="hint-cluster">
+                    <div class="hint-mouse" aria-hidden="true">
+                        <div class="hint-mouse-body">
+                            <span class="hint-mouse-wheel"></span>
+                            <span class="hint-mouse-nub"></span>
+                        </div>
+                    </div>
+                    <span class="hint-text">Look</span>
+                </div>
             </div>
-            <div class="row hint-group">
-                <span class="hint-text">Boost:</span>
-                <kbd>Shift</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Jump:</span>
-                <kbd>Space</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Toggle View:</span>
-                <kbd>V</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Toggle Fly Mode:</span>
-                <kbd>F</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Scale Character:</span>
-                <kbd>Z</kbd>
+            <div class="hint-actions">
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Shift</kbd></span>
+                    <span class="hint-text">Boost</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Space</kbd></span>
+                    <span class="hint-text">Jump</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>V</kbd></span>
+                    <span class="hint-text">Toggle View</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>F</kbd></span>
+                    <span class="hint-text">Toggle Fly</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Z</kbd></span>
+                    <span class="hint-text">Scale Character</span>
+                </div>
             </div>
         </div>
 
@@ -170,6 +78,7 @@
             <img src="./img/source.svg" alt="" />
         </a>
 
+        <script type="module" src="./control-hints.js"></script>
         <script type="module" src="./3dgs.js"></script>
     </body>
 </html>

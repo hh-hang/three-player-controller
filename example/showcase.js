@@ -34,6 +34,7 @@ import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
+import { bindVehicleHintMode } from "./control-hints.js";
 
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
@@ -333,6 +334,7 @@ async function init() {
             runSpeed: 600,
         },
     });
+    bindVehicleHintMode(player);
     enableModelShadows(player.playerModel);
     const staticStripBridge = createStaticStripPlatforms(prototypeMat, mainLayout, scene, {
         centerX: getBalancedKinematicMeetCenterX(mainLayout, trapLayout.wideWestX),
@@ -1591,6 +1593,7 @@ function createDebugPanel() {
     footIK.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
 
     const gui = new GUI({ title: "Showcase Controls", width: 320 });
+    if (window.matchMedia("(hover: none) and (pointer: coarse), (max-width: 768px)").matches) gui.close();
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",

@@ -241,6 +241,7 @@ function createDebugPanel() {
     footIK.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
 
     gui = new GUI({ title: "Foot IK Controls", width: 320 });
+    if (window.matchMedia("(hover: none) and (pointer: coarse), (max-width: 768px)").matches) gui.close();
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",

@@ -4,6 +4,7 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>Showcase</title>
+        <link rel="stylesheet" href="./styles/common.css" />
         <style>
             html,
             body {
@@ -18,116 +19,8 @@
                 width: 100vw;
                 height: 100vh;
             }
-
-            .hud {
-                position: fixed;
-                left: 12px;
-                top: 12px;
-                z-index: 9999;
-                color: #fff;
-                background: rgba(0, 0, 0, 0.45);
-                padding: 10px 12px;
-                border-radius: 8px;
-                font-size: 16px;
-                line-height: 1.3;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-                backdrop-filter: blur(4px);
-            }
-
-            .hud .row {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 6px;
-            }
-
-            .hud .row:last-child {
-                margin-bottom: 0;
-            }
-
-            .hint-text {
-                min-width: 96px;
-                color: #e6eef6;
-                font-size: 13px;
-            }
-
-            .hint-group {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            kbd {
-                display: inline-block;
-                min-width: 20px;
-                padding: 4px 7px;
-                border-radius: 6px;
-                color: #111;
-                background: linear-gradient(#f6f6f6, #e3e3e3);
-                border: 1px solid rgba(0, 0, 0, 0.15);
-                border-bottom-width: 2px;
-                font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-                text-align: center;
-                box-shadow:
-                    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-                    0 2px 4px rgba(0, 0, 0, 0.25);
-            }
-
-            .source {
-                position: fixed;
-                right: 16px;
-                bottom: 16px;
-                z-index: 10;
-                width: 44px;
-                height: 44px;
-                display: grid;
-                place-items: center;
-                border-radius: 50%;
-                background: rgba(255, 255, 255, 0.92);
-                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-            }
-
-            .source img {
-                width: 24px;
-                height: 24px;
-            }
-
-            #top-notice {
-                position: fixed;
-                top: 12px;
-                left: 50%;
-                transform: translateX(-50%);
-                z-index: 9999;
-                background: rgba(0, 0, 0, 0.45);
-                color: #e6eef6;
-                padding: 7px 16px;
-                border-radius: 8px;
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-                font-size: 13px;
-                line-height: 1.45;
-                text-align: center;
-                backdrop-filter: blur(4px);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-            }
-            #top-notice .credit-line {
-                white-space: nowrap;
-            }
-            #top-notice a {
-                color: #79c0ff;
-                text-decoration: none;
-            }
-            #top-notice a:hover {
-                text-decoration: underline;
-            }
-
-            @media (hover: none) and (pointer: coarse), (max-width: 768px) {
-                .hud,
-                .source {
-                    display: none !important;
-                }
-            }
         </style>
-        <script src="./loader.js"></script>
+        <script src="./loader.js" data-demo="Showcase"></script>
     </head>
     <body>
         <div id="container"></div>
@@ -143,39 +36,97 @@
             </div>
         </div>
 
-        <div class="hud" role="note" aria-label="Controls">
-            <div class="row hint-group">
-                <span class="hint-text">Move / Drive:</span>
-                <kbd>W</kbd>
-                <kbd>A</kbd>
-                <kbd>S</kbd>
-                <kbd>D</kbd>
+        <div class="hud" data-hint-mode="on-foot" role="note" aria-label="Controls">
+            <div class="hint-set" data-for="on-foot">
+                <div class="hint-move">
+                    <div class="hint-cluster">
+                        <div class="wasd">
+                            <kbd class="wasd-w">W</kbd>
+                            <kbd class="wasd-a">A</kbd>
+                            <kbd class="wasd-s">S</kbd>
+                            <kbd class="wasd-d">D</kbd>
+                        </div>
+                        <span class="hint-text">Move</span>
+                    </div>
+                    <div class="hint-cluster">
+                        <div class="hint-mouse" aria-hidden="true">
+                            <div class="hint-mouse-body">
+                                <span class="hint-mouse-wheel"></span>
+                                <span class="hint-mouse-nub"></span>
+                            </div>
+                        </div>
+                        <span class="hint-text">Look</span>
+                    </div>
+                </div>
+                <div class="hint-actions">
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>Shift</kbd></span>
+                        <span class="hint-text">Sprint</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>Space</kbd></span>
+                        <span class="hint-text">Jump</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>E</kbd></span>
+                        <span class="hint-text">Enter</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>V</kbd></span>
+                        <span class="hint-text">Toggle View</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>F</kbd></span>
+                        <span class="hint-text">Toggle Fly</span>
+                    </div>
+                </div>
             </div>
-            <div class="row hint-group">
-                <span class="hint-text">Sprint / Drift:</span>
-                <kbd>Shift</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Jump / Brake:</span>
-                <kbd>Space</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Enter / Exit:</span>
-                <kbd>E</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Toggle View:</span>
-                <kbd>V</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Toggle Fly:</span>
-                <kbd>F</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Reset Vehicle:</span>
-                <kbd>R</kbd>
+            <div class="hint-set" data-for="vehicle">
+                <div class="hint-move">
+                    <div class="hint-cluster">
+                        <div class="wasd">
+                            <kbd class="wasd-w">W</kbd>
+                            <kbd class="wasd-a">A</kbd>
+                            <kbd class="wasd-s">S</kbd>
+                            <kbd class="wasd-d">D</kbd>
+                        </div>
+                        <span class="hint-text">Drive</span>
+                    </div>
+                    <div class="hint-cluster">
+                        <div class="hint-mouse" aria-hidden="true">
+                            <div class="hint-mouse-body">
+                                <span class="hint-mouse-wheel"></span>
+                                <span class="hint-mouse-nub"></span>
+                            </div>
+                        </div>
+                        <span class="hint-text">Look</span>
+                    </div>
+                </div>
+                <div class="hint-actions">
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>Shift</kbd></span>
+                        <span class="hint-text">Drift</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>Space</kbd></span>
+                        <span class="hint-text">Brake</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>E</kbd></span>
+                        <span class="hint-text">Exit</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>V</kbd></span>
+                        <span class="hint-text">Toggle View</span>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-keys"><kbd>R</kbd></span>
+                        <span class="hint-text">Reset Vehicle</span>
+                    </div>
+                </div>
             </div>
         </div>
+        <script type="module" src="./control-hints.js"></script>
         <script type="module" src="./showcase.js"></script>
         <a class="source" href="https://github.com/hh-hang/three-player-controller/blob/master/example/showcase.js" target="_blank" rel="noopener noreferrer">
             <img src="./img/source.svg" alt="" />

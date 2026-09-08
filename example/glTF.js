@@ -23,6 +23,7 @@ import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
+import { bindVehicleHintMode } from "./control-hints.js";
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { CSM } from "three/examples/jsm/csm/CSM.js";
@@ -289,7 +290,7 @@ async function loadVehicleConfig(extra = {}) {
 async function spawnSceneSedan() {
     await player.loadVehicleModel(await loadVehicleConfig({
         scale: VEHICLE_CONFIG.scale * globalScale,
-        position: pos.clone().add(new Vector3(0, -0.2, -0.5)),
+        position: pos.clone().add(new Vector3(0, -0.3, -0.5)),
     }));
 
     const sedan = player.getAllVehicles().at(-1);
@@ -531,6 +532,7 @@ async function init() {
             { motion: "static", shape: { kind: "mesh", source: sceneModel } },
         ],
     });
+    bindVehicleHintMode(player);
     attachFootIK();
 
     // 先完成角色材质的 CSM 注入，避免等待车辆时用非 CSM shader 提前编译。
@@ -795,6 +797,7 @@ async function onPreviewDblClick() {
             { motion: "static", shape: { kind: "mesh", source: sceneModel } },
         ],
     });
+    bindVehicleHintMode(player);
     attachFootIK();
 
     player.getPlayerModel()?.traverse((child) => {
@@ -936,6 +939,7 @@ function initGUI() {
     const applyFootIKOptions = (options) => footIK?.configure(options);
 
     gui = new GUI({ title: "Showcase Controls", width: 320 });
+    if (window.matchMedia("(hover: none) and (pointer: coarse), (max-width: 768px)").matches) gui.close();
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",

@@ -1,17 +1,12 @@
-
 (function () {
-    const scriptSrc = document.currentScript?.src || "";
-    const baseUrl = scriptSrc.substring(0, scriptSrc.lastIndexOf("/") + 1);
-    const gifUrl = baseUrl + "img/loader.gif";
-    const gifSize = 120;
-    const title = "three-player-controller";
+    const script = document.currentScript || document.querySelector("script[src*='loader.js']");
+    const demo = script?.dataset?.demo || "";
     const fade = 600;
 
-    /* Google Fonts */
     if (!document.querySelector('link[href*="Cinzel"]')) {
         const link = document.createElement("link");
         link.rel = "stylesheet";
-        link.href = "https://fonts.googleapis.com/css2?family=Cinzel:wght@900&display=swap";
+        link.href = "https://fonts.googleapis.com/css2?family=Cinzel:wght@900&family=Nunito:wght@700&display=swap";
         document.head.appendChild(link);
     }
 
@@ -28,7 +23,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: opacity ${fade}ms cubic-bezier(0.4,0,0.2,1);
+            transition: opacity ${fade}ms cubic-bezier(0.4, 0, 0.2, 1);
         }
         #__loading-overlay__.fade-out {
             opacity: 0;
@@ -38,27 +33,65 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 20px;
+            padding: 0 1.5rem;
             user-select: none;
         }
-        .__ldr-gif__ {
-            width: ${gifSize}px;
-            height: ${gifSize}px;
-            object-fit: contain;
-            display: block;
+        .__ldr-play__ {
+            width: 3.25rem;
+            height: 3.25rem;
+            border-radius: 50%;
+            background: #e8a020;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.4rem;
+            box-shadow: 0 2px 8px rgba(232, 160, 32, 0.35);
+            animation: __ldr-pulse__ 1.6s ease-in-out infinite;
+        }
+        .__ldr-play__ svg {
+            width: 14px;
+            height: 14px;
+            fill: #fff;
+            margin-left: 2px;
         }
         .__ldr-title__ {
             font-family: "Cinzel", serif;
             font-size: clamp(1.4rem, 3.5vw, 2.2rem);
             font-weight: 900;
             letter-spacing: 0.06em;
-            white-space: nowrap;
             color: #1a1a2e;
             text-align: center;
+            margin-bottom: 0.3rem;
+        }
+        .__ldr-meta__ {
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 0.45em;
+            margin-bottom: 1.5rem;
+        }
+        .__ldr-kicker__ {
+            font-family: "Nunito", sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #999;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+        .__ldr-status__ {
+            font-family: "Nunito", sans-serif;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #555;
+            line-height: 1.4;
+        }
+        .__ldr-status__:empty {
+            display: none;
         }
         .__ldr-progress__ {
-            width: 220px;
-            display: none;
+            width: min(220px, 70vw);
+            display: flex;
             flex-direction: column;
             align-items: center;
             gap: 6px;
@@ -66,66 +99,123 @@
         .__ldr-track__ {
             width: 100%;
             height: 4px;
-            background: rgba(0,0,0,0.12);
+            background: rgba(0, 0, 0, 0.12);
             border-radius: 2px;
             overflow: hidden;
         }
         .__ldr-fill__ {
             height: 100%;
-            width: 0%;
-            background: #4a7fcb;
+            width: 40%;
+            background: #e8a020;
             border-radius: 2px;
+            transform: translateX(-120%);
+            animation: __ldr-slide__ 1.35s ease-in-out infinite;
+        }
+        .__ldr-fill__.is-determinate {
+            width: 0%;
+            transform: none;
+            animation: none;
             transition: width 0.25s ease;
         }
         .__ldr-pct__ {
-            font-family: system-ui, sans-serif;
+            font-family: "Nunito", system-ui, sans-serif;
             font-size: 12px;
+            font-weight: 700;
             color: #555;
             letter-spacing: 0.05em;
+            min-height: 1em;
+        }
+        @keyframes __ldr-pulse__ {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 2px 8px rgba(232, 160, 32, 0.35);
+            }
+            50% {
+                transform: scale(1.08);
+                background: #f5b535;
+                box-shadow: 0 8px 24px rgba(232, 160, 32, 0.45);
+            }
+        }
+        @keyframes __ldr-slide__ {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(350%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .__ldr-play__,
+            .__ldr-fill__ {
+                animation: none;
+            }
+            .__ldr-fill__:not(.is-determinate) {
+                width: 100%;
+                transform: none;
+            }
+            #__loading-overlay__ {
+                transition: none;
+            }
         }
     `;
     document.head.appendChild(style);
 
     const overlay = document.createElement("div");
     overlay.id = "__loading-overlay__";
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-busy", "true");
+    overlay.setAttribute("aria-live", "polite");
     overlay.innerHTML = `
-    <div class="__ldr-content__">
-        <img class="__ldr-gif__" src="${gifUrl}" alt="loading" />
-        <div class="__ldr-title__">${title}</div>
-        <div class="__ldr-progress__" id="__ldr-progress__">
-            <div class="__ldr-track__"><div class="__ldr-fill__" id="__ldr-fill__"></div></div>
-            <div class="__ldr-pct__" id="__ldr-pct__">0%</div>
-        </div>
-    </div>`;
-
+        <div class="__ldr-content__">
+            <div class="__ldr-play__" aria-hidden="true">
+                <svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg>
+            </div>
+            <div class="__ldr-title__">three-player-controller</div>
+            <div class="__ldr-meta__">
+                <div class="__ldr-kicker__">Loading</div>
+                <div class="__ldr-status__" id="__ldr-status__"></div>
+            </div>
+            <div class="__ldr-progress__" id="__ldr-progress__">
+                <div class="__ldr-track__"><div class="__ldr-fill__" id="__ldr-fill__"></div></div>
+                <div class="__ldr-pct__" id="__ldr-pct__"></div>
+            </div>
+        </div>`;
     document.documentElement.appendChild(overlay);
 
-    /* Public API */
+    const fill = overlay.querySelector("#__ldr-fill__");
+    const pct = overlay.querySelector("#__ldr-pct__");
+    const status = overlay.querySelector("#__ldr-status__");
+    if (demo) status.textContent = demo;
+
+    window.setLoaderStatus = function (text) {
+        if (status) status.textContent = text || "";
+    };
+
     window.setLoaderProgress = function (loaded, total) {
-        const wrap = document.getElementById("__ldr-progress__");
-        const fill = document.getElementById("__ldr-fill__");
-        const pct  = document.getElementById("__ldr-pct__");
         if (!fill) return;
-        if (wrap) wrap.style.display = "flex";
         if (total > 0) {
-            const p = Math.min(100, Math.round(loaded / total * 100));
+            fill.classList.add("is-determinate");
+            const p = Math.min(100, Math.round((loaded / total) * 100));
             fill.style.width = p + "%";
             if (pct) pct.textContent = p + "%";
         } else {
-            // total 未知时显示已加载量
-            const mb = (loaded / 1048576).toFixed(1);
-            fill.style.width = "100%"; // 用满格表示"仍在加载"
-            if (pct) pct.textContent = mb + " MB";
+            fill.classList.remove("is-determinate");
+            fill.style.width = "";
+            if (pct) pct.textContent = (loaded / 1048576).toFixed(1) + " MB";
         }
     };
 
     window.hideLoader = function () {
         const el = document.getElementById("__loading-overlay__");
-        if (!el) return;
+        if (!el || el.dataset.hiding) return;
+        el.dataset.hiding = "1";
         el.classList.add("fade-out");
-        el.addEventListener("transitionend", () => {
+        el.setAttribute("aria-busy", "false");
+
+        let cleaned = false;
+        const done = () => {
+            if (cleaned) return;
+            cleaned = true;
             el.remove();
             document.getElementById("__loader-style__")?.remove();
-        }, { once: true });
+        };
+        el.addEventListener("transitionend", done, { once: true });
+        setTimeout(done, fade + 80);
     };
 })();

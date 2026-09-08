@@ -618,6 +618,7 @@ async function ensurePlayer() {
 // 创建调试面板
 function initGUI() {
     const gui = new GUI({ title: "3D Tiles Scene", width: 260 });
+    if (window.matchMedia("(hover: none) and (pointer: coarse), (max-width: 768px)").matches) gui.close();
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",

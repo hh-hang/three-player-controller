@@ -4,6 +4,7 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>three-player-controller · FPS Game</title>
+        <link rel="stylesheet" href="../styles/common.css" />
         <style>
             html, body {
                 height: 100%;
@@ -15,63 +16,6 @@
                 height: 100vh;
                 position: absolute;
                 background: transparent;
-            }
-
-            .hud {
-                position: fixed;
-                left: 12px;
-                top: 12px;
-                z-index: 9999;
-                color: #fff;
-                background: rgba(0, 0, 0, 0.45);
-                padding: 10px 12px;
-                border-radius: 8px;
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-                font-size: 16px;
-                line-height: 1.3;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-                backdrop-filter: blur(4px);
-            }
-            .hud .row {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 6px;
-            }
-            .hud .row:last-child {
-                margin-bottom: 0;
-            }
-
-            kbd {
-                display: inline-block;
-                min-width: 20px;
-                padding: 4px 7px;
-                border-radius: 6px;
-                color: #111;
-                background: linear-gradient(#f6f6f6, #e3e3e3);
-                border: 1px solid rgba(0, 0, 0, 0.15);
-                border-bottom-width: 2px;
-                font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-                text-align: center;
-                box-shadow:
-                    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-                    0 2px 4px rgba(0, 0, 0, 0.25);
-            }
-            .hint-text {
-                min-width: 96px;
-                color: #e6eef6;
-                font-size: 13px;
-            }
-            .hint-group {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            @media (hover: none) and (pointer: coarse), (max-width: 768px) {
-                .hud {
-                    display: none !important;
-                }
             }
 
             /* 准心 */
@@ -90,20 +34,12 @@
                 z-index: 9999;
             }
 
-            /* 右下角面板：源码（上） + 弹药（下） */
+            /* 弹药面板位于右下角源码按钮上方，间距 8px。 */
             #weapon-hud { display: none; }
             #br-panel {
-                position: fixed; bottom: 16px; right: 16px; z-index: 9999;
+                position: fixed; bottom: 72px; right: 16px; z-index: 9999;
                 display: flex; flex-direction: column; align-items: center; gap: 8px;
             }
-            .source {
-                padding: 12px;
-                border-radius: 50%;
-                background-color: #fff;
-                opacity: 0.9;
-                box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
-            }
-            .source img { display: block; width: 24px; }
             #ammo-hud {
                 display: none; flex-direction: column; align-items: center; gap: 4px;
             }
@@ -129,36 +65,6 @@
             .ammo-divider { color: #fff; font-family: monospace; font-size: 15px; margin: 0 1px; }
             #ammo-total-val { color: #fff; font-family: monospace; font-size: 13px;
                 text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
-
-            .model-credit {
-                position: fixed;
-                top: 10px;
-                left: 50%;
-                transform: translateX(-50%);
-                z-index: 9999;
-                font-size: 16px;
-                color: #e6eef6;
-                background: rgba(0, 0, 0, 0.35);
-                padding: 6px 12px;
-                border-radius: 999px;
-                backdrop-filter: blur(4px);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-                font-family:
-                    system-ui,
-                    -apple-system,
-                    "Segoe UI",
-                    Roboto,
-                    Arial;
-            }
-
-            .model-credit a {
-                color: #6ecbff;
-                text-decoration: none;
-            }
-
-            .model-credit a:hover {
-                text-decoration: underline;
-            }
 
             /* ── Start Screen ── */
             #start-screen {
@@ -203,7 +109,7 @@
                 flex-shrink: 0;
             }
         </style>
-        <script src="../loader.js"></script>
+        <script src="../loader.js" data-demo="FPS Game"></script>
     </head>
     <body>
         <div id="container"></div>
@@ -217,47 +123,65 @@
         </div>
 
         <div class="hud" role="note" aria-label="Controls">
-            <div class="row hint-group">
-                <span class="hint-text">Move:</span>
-                <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+            <div class="hint-move">
+                <div class="hint-cluster">
+                    <div class="wasd">
+                        <kbd class="wasd-w">W</kbd>
+                        <kbd class="wasd-a">A</kbd>
+                        <kbd class="wasd-s">S</kbd>
+                        <kbd class="wasd-d">D</kbd>
+                    </div>
+                    <span class="hint-text">Move</span>
+                </div>
+                <div class="hint-cluster">
+                    <div class="hint-mouse" aria-hidden="true">
+                        <div class="hint-mouse-body">
+                            <span class="hint-mouse-wheel"></span>
+                            <span class="hint-mouse-nub"></span>
+                        </div>
+                    </div>
+                    <span class="hint-text">Look</span>
+                </div>
             </div>
-            <div class="row hint-group">
-                <span class="hint-text">Sprint:</span>
-                <kbd>Shift</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Jump:</span>
-                <kbd>Space</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Toggle View:</span>
-                <kbd>V</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Switch Weapon:</span>
-                <kbd>1</kbd><kbd>4</kbd>
-                <span class="hint-text">/ Scroll</span>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Aim (Hold):</span>
-                <kbd>RMB</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Shoot:</span>
-                <kbd>LMB</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Reload:</span>
-                <kbd>R</kbd>
+            <div class="hint-actions">
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Shift</kbd></span>
+                    <span class="hint-text">Sprint</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Space</kbd></span>
+                    <span class="hint-text">Jump</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>V</kbd></span>
+                    <span class="hint-text">Toggle View</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>1</kbd><kbd>4</kbd></span>
+                    <span class="hint-text">Switch Weapon / Scroll</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>RMB</kbd></span>
+                    <span class="hint-text">Aim (Hold)</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>LMB</kbd></span>
+                    <span class="hint-text">Shoot</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>R</kbd></span>
+                    <span class="hint-text">Reload</span>
+                </div>
             </div>
         </div>
 
         <div id="weapon-hud"></div>
 
+        <a class="source" href="https://github.com/hh-hang/three-player-controller/blob/master/example/shooting/shooting.js" target="_blank" rel="noopener noreferrer">
+            <img src="../img/source.svg" alt="" />
+        </a>
+
         <div id="br-panel">
-            <a class="source" href="https://github.com/hh-hang/three-player-controller/blob/master/example/shooting/shooting.js" target="_blank" rel="noopener noreferrer">
-                <img src="../img/source.svg" alt="" />
-            </a>
             <div id="ammo-hud">
                 <div class="weapon-img-box">
                     <svg width="96" height="38" viewBox="0 0 96 38" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -284,6 +208,7 @@
             <br />
         </div>
 
+        <script type="module" src="../control-hints.js"></script>
         <script type="module" src="./shooting.js"></script>
     </body>
 </html>
