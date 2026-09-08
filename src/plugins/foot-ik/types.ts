@@ -162,7 +162,7 @@ export type FootIKOptions = {
     minKneeBend?: number;
     /** 膝盖最大弯曲角，单位为弧度，默认 145°。 */
     maxKneeBend?: number;
-    /** 骨盆可达性计算保留的膝盖弯曲角，单位为弧度，默认 15°。 */
+    /** 骨盆可达性计算保留的膝盖弯曲角，单位为弧度，默认 0°。 */
     pelvisKneeBend?: number;
     /** 移动时是否使用直 pole（膝盖朝角色前方平面），默认 false，关闭则保留动画 pole。 */
     straightPoleEnabled?: boolean;

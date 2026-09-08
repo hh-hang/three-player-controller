@@ -1108,7 +1108,7 @@ function initGUI() {
 }
 
 function updateFootIKDebugPanel() {
-    if (!footIK) return;
+    if (!footIK || !footIKDebugParams) return;
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
     footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");

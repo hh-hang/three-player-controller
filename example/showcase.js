@@ -1824,7 +1824,7 @@ function animate(timestamp) {
 
 // 更新 Foot IK 运行状态只读字段。
 function updateFootIKDebugPanel() {
-    if (!footIK) return;
+    if (!footIK || !footIKDebugParams) return;
     footIKDebugParams.pelvisOffset = footIK.getPelvisOffset();
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
     footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
