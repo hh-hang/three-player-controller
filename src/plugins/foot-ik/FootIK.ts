@@ -387,6 +387,7 @@ export class FootIK {
         this.swingClearance *= ratio;
         this.maxPredictionClearance *= ratio;
         this.pelvisOffset *= ratio;
+        for (const leg of Object.values(this.legs)) leg.offsetY *= ratio;
         if (this.pelvisOffsetOverride !== null) this.pelvisOffsetOverride *= ratio;
         this.raycaster.far = this.raycastFar;
         this.footPhaseOptions.groundThreshold = this.footPhaseGroundThreshold;
@@ -472,6 +473,8 @@ export class FootIK {
         }
         resetPredictiveFootState(this.legs.left.predictive);
         resetPredictiveFootState(this.legs.right.predictive);
+        this.legs.left.heightSupport = null;
+        this.legs.right.heightSupport = null;
     }
 
     /** 空中 / 停用贴地时丢掉反应式 IK 残留，避免落地从起飞前的世界高度往下坠。 */
@@ -481,6 +484,7 @@ export class FootIK {
             if (!isReadyLeg(leg)) continue;
             leg.weight = 0;
             leg.offsetY = 0;
+            leg.heightSupport = null;
             leg.plantedWeight = 0;
             leg.hasPelvisTarget = false;
             leg.movePenetrating = false;
@@ -645,14 +649,24 @@ export class FootIK {
         }
 
         // 改变水平落点的预测结果在支撑阶段继续使用原落点，避免切回动画时跳变。
-        if (leg.planted && this.resolvePredictivePlantedFoot(leg, footWorld, delta)) return;
+        if (leg.planted && this.resolvePredictivePlantedFoot(leg, footWorld, delta)) {
+            leg.heightSupport = null;
+            return;
+        }
 
         // 预测摆动自己做四角防穿透，并从上一帧反应式权重/高度阻尼过去。
-        if (!leg.planted && this.resolvePredictiveSwingFoot(leg, footWorld, phase, delta)) return;
+        if (!leg.planted && this.resolvePredictiveSwingFoot(leg, footWorld, phase, delta)) {
+            leg.heightSupport = null;
+            return;
+        }
         // 偏移落点留下的支撑残差在新摆腿前段连续归还给动画。
-        if (!leg.planted && this.resolvePredictiveReleaseFoot(leg, footWorld)) return;
+        if (!leg.planted && this.resolvePredictiveReleaseFoot(leg, footWorld)) {
+            leg.heightSupport = null;
+            return;
+        }
 
         const hit = this.castBestFootGround(leg);
+        this.transportFootHeight(leg, hit);
 
         // 脚底没有命中地面时，本帧完全交还给原动画。
         if (!hit) {
@@ -781,7 +795,28 @@ export class FootIK {
             leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
         }
 
+        // 保存接触点的局部坐标，下帧只同步平台自身的移动、旋转和缩放。
+        if (hit.object) {
+            leg.heightSupport = hit.object;
+            leg.heightSupportLocal.copy(hit.point);
+            hit.object.worldToLocal(leg.heightSupportLocal);
+            leg.heightSupportWorldY = hit.point.y;
+            leg.heightSupportScale = this.appliedScale;
+        }
         this.updateFootDebug(leg, hit.point);
+    }
+
+    /** 先把历史高度搬到本帧支撑面，再对剩余贴地误差限速。 */
+    private transportFootHeight(leg: ReadyFootIKLeg, hit: FootIKGroundHit | null): void {
+        if (leg.heightSupport && leg.heightSupport === hit?.object) {
+            const anchor = leg.heightSupport.localToWorld(this.tmpV6.copy(leg.heightSupportLocal));
+            // 绕接触点缩放脚离地的高度。
+            const scaleRatio = this.appliedScale / leg.heightSupportScale;
+            leg.smoothedTarget.y = anchor.y
+                + (leg.smoothedTarget.y - leg.heightSupportWorldY) * scaleRatio;
+        }
+        // 无命中、超出范围或切到预测线路后，不继续沿用旧平台。
+        leg.heightSupport = null;
     }
 
     /** 当前是跑步动画时高度速度不限制。 */
@@ -791,7 +826,7 @@ export class FootIK {
         return runAnim && clipName === runAnim ? Infinity : speed;
     }
 
-    /** 从上一帧世界高度沿 up 限速移动到目标偏移；XZ 跟当前动画脚。 */
+    /** 从已同步支撑面变换的历史高度沿 up 限速移动；XZ 跟当前动画脚。 */
     private moveFootHeightAlongUp(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
@@ -818,7 +853,8 @@ export class FootIK {
             -speed * delta,
             speed * delta,
         );
-        leg.offsetY = movedAlongUp - footAlongUp;
+        // 目标有效不代表历史仍有效；缩放或根节点突变后也必须遵守当前脚部范围。
+        leg.offsetY = MathUtils.clamp(movedAlongUp - footAlongUp, -this.maxFootDrop, this.maxFootRaise);
         leg.smoothedTarget.copy(footWorld).addScaledVector(this.up, leg.offsetY);
     }
 

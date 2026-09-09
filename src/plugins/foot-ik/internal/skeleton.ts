@@ -48,6 +48,10 @@ export function createLeg(
 
         // IK 运行时目标和地面命中信息。
         smoothedTarget: new Vector3(),
+        heightSupport: null,
+        heightSupportLocal: new Vector3(),
+        heightSupportWorldY: 0,
+        heightSupportScale: 1,
         pelvisTarget: new Vector3(),
         hasPelvisTarget: false,
         hitPoint: new Vector3(),

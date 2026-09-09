@@ -139,9 +139,9 @@ export type FootIKOptions = {
     maxFootRaise?: number;
     /** 支撑脚 IK 最大下探距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
     maxFootDrop?: number;
-    /** 支撑脚贴地高度速度基准值（按 scale 缩放，单位/秒），默认 Infinity；0 为不追随。 */
+    /** 支撑脚相对支撑面的贴地高度速度基准值（按 scale 缩放，单位/秒），默认 Infinity；0 为不追随，平台运动另行同步。 */
     plantedHeightSpeed?: number;
-    /** 摆动脚陷入上抬高度速度基准值（按 scale 缩放，单位/秒），默认 Infinity；0 为不追随。 */
+    /** 摆动脚相对支撑面的陷入上抬速度基准值（按 scale 缩放，单位/秒），默认 Infinity；0 为不追随，平台运动另行同步。 */
     penetrationLiftSpeed?: number;
     /** 虚拟脚底左右半宽基准值（按 scale 缩放），默认 7。 */
     soleHalfWidth?: number;
@@ -303,6 +303,10 @@ export type FootIKLeg = {
     toe: Bone | null;
     ready: boolean;
     smoothedTarget: Vector3;
+    heightSupport: Object3D | null;
+    heightSupportLocal: Vector3;
+    heightSupportWorldY: number;
+    heightSupportScale: number;
     pelvisTarget: Vector3;
     hasPelvisTarget: boolean;
     hitPoint: Vector3;
