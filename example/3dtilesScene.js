@@ -2,9 +2,7 @@ import tellux from "tellux";
 import {
     AxesHelper,
     Box3,
-    DirectionalLight,
     Group,
-    HemisphereLight,
     Matrix4,
     Quaternion,
     Sphere,
@@ -58,9 +56,6 @@ const BASE_RUN_SPEED = 600;
 const BASE_FLY_SPEED = 2100;
 const TURBO_SPEED_SCALE = 3;
 
-// 大气与体积云：启动时关闭，检测到玩家落地后再开启
-const CLOUD_COVERAGE = 0.35;
-
 const container = document.querySelector("#container");
 if (!(container instanceof HTMLElement)) {
     throw new Error("Missing #container");
@@ -89,7 +84,7 @@ const viewer = new tellux.Viewer(container, {
     },
     scene: {
         atmosphere: {
-            show: false,
+            show: true,
             lighting: {
                 mode: "post-process",
                 sunLight: true,
@@ -102,8 +97,8 @@ const viewer = new tellux.Viewer(container, {
             },
         },
         clouds: {
-            show: false,
-            coverage: CLOUD_COVERAGE,
+            show: true,
+            coverage: 0.35,
         },
         postProcess: {
             lensFlare: { enabled: false },
@@ -117,13 +112,6 @@ viewer.controls.enabled = false;
 viewer.camera.allowUnderground = true;
 viewer.tileset.group.visible = false;
 
-// 环境光
-const hemiLight = new HemisphereLight(0xc8e0ff, 0x3d2b1f, 1.1);
-// 平行光
-const sunLight = new DirectionalLight(0xfff4e0, 1.6);
-sunLight.position.set(40, 80, 20);
-viewer.scene.threeScene.add(hemiLight, sunLight);
-
 // 控制器
 const orbitControls = new OrbitControls(viewer.camera.threeCamera, viewer.renderer.domElement);
 orbitControls.enablePan = false;
@@ -133,11 +121,8 @@ const localAxes = new AxesHelper(5000);
 localAxes.name = "local-axes";
 localAxes.visible = false;
 localAxes.renderOrder = 10;
-localAxes.traverse((object) => {
-    if (!object.material || Array.isArray(object.material)) return;
-    object.material.depthTest = false;
-    object.material.depthWrite = false;
-});
+localAxes.material.depthTest = false;
+localAxes.material.depthWrite = false;
 viewer.scene.threeScene.add(localAxes);
 
 // 帧率
@@ -156,68 +141,14 @@ let localFrame = null;
 let tileCollision = null;
 let player = null;
 let skipCollisionAfterRebase = false;
-let attributionFrame = 0;
 let running = true;
 let turboMode = false;
-let atmosphereCloudsEnabled = false;
 
 // 局部坐标系下每帧把世界到 ECEF 的矩阵写进大气。
-function setAtmosphereWorldToECEFMatrix(targetViewer, matrix) {
-    const atmosphere = targetViewer.atmosphere;
-    if (!atmosphere) return;
-
-    if (typeof atmosphere.setWorldToECEFMatrix === "function") {
-        atmosphere.setWorldToECEFMatrix(matrix);
-        return;
-    }
-
-    const targets = [
-        atmosphere.aerialPerspectiveEffect,
-        atmosphere.cloudsEffect,
-        atmosphere.sunLightSource,
-        atmosphere.moonLightSource,
-        atmosphere.skyLightSource,
-        atmosphere.starsMaterial,
-    ];
-
-    for (const target of targets) {
-        copyWorldToECEFMatrix(target, matrix);
-    }
-}
-
-// 把矩阵写到大气、云或天体上的 worldToECEFMatrix。
-function copyWorldToECEFMatrix(target, matrix) {
-    if (!target) return;
-    const dest = target.worldToECEFMatrix;
-    if (dest?.copy) {
-        dest.copy(matrix);
-        return;
-    }
-    if (dest?.value?.copy) dest.value.copy(matrix);
-}
-
-// 玩家落地后开启大气、体积云与大气光照。
-function enableAtmosphereAndClouds() {
-    if (localFrame) setAtmosphereWorldToECEFMatrix(viewer, localFrame.localToEcef);
-    viewer.scene.atmosphere.show = true;
-    viewer.scene.clouds.show = true;
-    viewer.scene.clouds.coverage = CLOUD_COVERAGE;
-    viewer.scene.syncRuntimeEffects();
-    viewer.postProcessing?.applyEffects();
-    if (viewer.atmosphere?.setAtmosphereVisible) {
-        viewer.atmosphere.setAtmosphereVisible(true);
-    }
-    viewer.atmosphere?.updateLightSources?.();
-    hemiLight.visible = false;
-    sunLight.visible = false;
-    atmosphereCloudsEnabled = true;
-}
-
-// 每帧检测：玩家在地面且碰撞已生效时，再开大气与光照。
-function tryEnableAtmosphereAndClouds() {
-    if (atmosphereCloudsEnabled || !player || !localFrame || skipCollisionAfterRebase) return;
-    if (!player.getIsOnGround()) return;
-    enableAtmosphereAndClouds();
+function syncAtmosphereFrame() {
+    const atmosphere = viewer.atmosphere;
+    atmosphere.aerialPerspectiveEffect.worldToECEFMatrix.copy(localFrame.localToEcef);
+    atmosphere.cloudsEffect.worldToECEFMatrix.copy(localFrame.localToEcef);
 }
 
 // 以人物附近 ECEF 点建立局部 Y-up 坐标系，走远后 rebase。
@@ -231,20 +162,11 @@ class LocalFrameManager {
         this.group.matrixAutoUpdate = false;
         this.localToEcef = new Matrix4();
         this.ecefToLocal = new Matrix4();
-        this.objectFrame = new Matrix4();
         this.deltaMatrix = new Matrix4();
         this.deltaQuat = new Quaternion();
         this.scratchEcef = new Vector3();
         this.scratchCartographic = { lat: 0, lon: 0, height: 0 };
         this.setOrigin(origin);
-    }
-
-    // 把 3D Tiles 挂到局部坐标系下
-    attachTilesetGroup(tilesetGroup, scene) {
-        tilesetGroup.parent?.remove(tilesetGroup);
-        if (this.group.parent !== scene) scene.add(this.group);
-        this.group.add(tilesetGroup);
-        this.group.updateMatrixWorld(true);
     }
 
     // 按经纬高重设局部原点
@@ -257,17 +179,11 @@ class LocalFrameManager {
             0,
             0,
             0,
-            this.objectFrame
+            this.localToEcef
         );
-        this.localToEcef.copy(this.objectFrame);
-        this.ecefToLocal.copy(this.objectFrame).invert();
+        this.ecefToLocal.copy(this.localToEcef).invert();
         this.group.matrix.copy(this.ecefToLocal);
         this.group.updateMatrixWorld(true);
-    }
-
-    // 局部点转到 ECEF
-    localToEcefPoint(local, target = new Vector3()) {
-        return target.copy(local).applyMatrix4(this.localToEcef);
     }
 
     // 人物离原点太远时平移局部系，并同步胶囊、相机和速度
@@ -275,7 +191,7 @@ class LocalFrameManager {
         const position = target.getPosition();
         if (!position || position.length() < this.rebaseDistance) return false;
 
-        this.localToEcefPoint(position, this.scratchEcef);
+        this.scratchEcef.copy(position).applyMatrix4(this.localToEcef);
         this.ellipsoid.getPositionToCartographic(this.scratchEcef, this.scratchCartographic);
 
         this.deltaMatrix.copy(this.localToEcef);
@@ -331,7 +247,7 @@ class TileCollisionManager {
         this.scratchSphere = new Sphere();
         this.onLoadModel = (event) => this.track(event.scene, this.isTileVisible(event.tile, event.scene));
         this.onDisposeModel = (event) => this.untrack(event.scene);
-        this.onVisibilityChange = (event) => this.setVisible(event.scene, event.visible, event.tile);
+        this.onVisibilityChange = (event) => this.setVisible(event.scene, event.visible);
     }
 
     // 监听加载 / 卸载 / 可见性，并补登记已在场的瓦片
@@ -405,12 +321,11 @@ class TileCollisionManager {
     }
 
     // 同步可见性；藏起来就拆碰撞，避免粗父级残留
-    setVisible(scene, visible, tile) {
+    setVisible(scene, visible) {
         const entry = this.tracked.get(scene) ?? this.track(scene, visible);
         if (!entry) return;
         entry.visible = visible;
         if (!visible) this.removeCollider(entry);
-        if (tile) entry.tile = tile;
     }
 
     // 登记瓦片局部中心和半径，已跟踪则只改可见性
@@ -485,14 +400,8 @@ function renderAttributions() {
     }
 }
 
-// 每帧刷新版权条
-function scheduleAttributionUpdate() {
-    renderAttributions();
-    attributionFrame = window.requestAnimationFrame(scheduleAttributionUpdate);
-}
-
 // 创建或更新局部坐标系
-function ensureLocalFrame(origin = CITIES[currentCity()]) {
+function ensureLocalFrame(origin) {
     if (!localFrame) {
         localFrame = new LocalFrameManager(viewer.tileset.ellipsoid, origin);
         viewer.scene.threeScene.add(localFrame.group);
@@ -501,28 +410,13 @@ function ensureLocalFrame(origin = CITIES[currentCity()]) {
     localFrame.setOrigin(origin);
 }
 
-// 把当前 3D Tiles 挂到局部坐标系
-function attachTilesetToLocalFrame() {
-    if (!activeLayer || !localFrame) return;
-    localFrame.attachTilesetGroup(activeLayer.tileset.group, viewer.scene.threeScene);
-}
-
-// 应用步行 / 奔跑 / 飞行速度，极速时放大飞行速度
-function applySpeedMode(target = player) {
-    if (!target) return;
-    const speedScale = turboMode ? TURBO_SPEED_SCALE : 1;
-    target.setPlayerSpeed(BASE_WALK_SPEED);
-    target.setPlayerRunSpeed(BASE_RUN_SPEED);
-    target.setPlayerFlySpeed(BASE_FLY_SPEED * speedScale);
-}
-
 // 飞行时按住 Shift 切换极速
 function syncTurboMode() {
     if (!player) return;
     const next = player.isFlying && player.input.shift;
     if (next === turboMode) return;
     turboMode = next;
-    applySpeedMode(player);
+    player.setPlayerFlySpeed(BASE_FLY_SPEED * (turboMode ? TURBO_SPEED_SCALE : 1));
 }
 
 // 极速时拉宽视野
@@ -535,29 +429,18 @@ function updateTurboFov() {
     }
 }
 
-// 绑定当前瓦片图层的动态碰撞
-function bindTileCollision() {
-    if (!activeLayer || !player) return;
-    tileCollision?.dispose();
-    tileCollision = new TileCollisionManager(activeLayer.tileset, player);
-    tileCollision.attach();
-}
-
-// 切换城市或重新出生
+// 切换城市或重新出生时悬停，等待周围地形加载
 function respawn() {
     ensureLocalFrame(CITIES[currentCity()]);
-    attachTilesetToLocalFrame();
     viewer.clock.hourUTC = CITIES[currentCity()].hourUTC;
     player?.reset(spawnLocalPosition());
+    if (player && !player.isFlying) player.setInput({ toggleFly: true });
     player?.setSkipCapsuleCollision(true);
     skipCollisionAfterRebase = true;
 }
 
 // 加载 Google Photorealistic 3D Tiles
 function loadPhotorealisticTiles() {
-    tileCollision?.dispose();
-    tileCollision = null;
-    activeLayer?.remove();
     ensureLocalFrame(CITIES[currentCity()]);
     activeLayer = viewer.load3DTileset({
         type: "cesium-ion",
@@ -567,14 +450,12 @@ function loadPhotorealisticTiles() {
         creasedNormals: true,
         materialMode: "unlit",
     });
-    attachTilesetToLocalFrame();
-    if (player) bindTileCollision();
+    localFrame.group.add(activeLayer.tileset.group);
+    localFrame.group.updateMatrixWorld(true);
 }
 
 // 玩家控制器
-async function ensurePlayer() {
-    if (player) return player;
-
+async function initPlayer() {
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync("./glb/josh.glb");
     player = new playerController();
@@ -603,16 +484,17 @@ async function ensurePlayer() {
             flyHoverDownAnim: "flyHoverDown",
             headBoneName: "mixamorigHead",
             rotateY: Math.PI,
+            speed: BASE_WALK_SPEED,
+            runSpeed: BASE_RUN_SPEED,
+            flySpeed: BASE_FLY_SPEED,
             acceleration: 500,
             deceleration: 10000000,
         },
     });
     player.setPlayerCapsuleDebug(guiParams.playerCapsuleDebug);
     player.setColliderDebug(guiParams.colliderDebug);
-    applySpeedMode(player);
     // 启用实际太阳光、天空光和环境反射。
-    viewer.atmosphere?.setPostProcessMaterialLights?.(true);
-    return player;
+    viewer.atmosphere.setPostProcessMaterialLights(true);
 }
 
 // 创建调试面板
@@ -627,9 +509,7 @@ function initGUI() {
     });
     gui.domElement.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    gui.add(guiParams, "city", CITY_OPTIONS).name("City").onChange(() => {
-        respawn();
-    });
+    gui.add(guiParams, "city", CITY_OPTIONS).name("City").onChange(respawn);
     gui.add(guiParams, "playerCapsuleDebug").name("Capsule Debug").onChange((value) => {
         player?.setPlayerCapsuleDebug(value);
     });
@@ -644,12 +524,13 @@ function initGUI() {
 // 启动示例
 async function start() {
     await viewer.ready;
-    ensureLocalFrame(CITIES[currentCity()]);
     loadPhotorealisticTiles();
-    await ensurePlayer();
-    bindTileCollision();
+    await initPlayer();
+    tileCollision = new TileCollisionManager(activeLayer.tileset, player);
+    tileCollision.attach();
     respawn();
     initGUI();
+    requestAnimationFrame(loop);
     // 关闭加载页面
     window.hideLoader?.();
 }
@@ -664,32 +545,28 @@ function loop(time) {
         }
         syncTurboMode();
         void player.update();
-        syncTurboMode();
         if (localFrame?.maybeRebase(player)) {
             player.setSkipCapsuleCollision(true);
             skipCollisionAfterRebase = true;
         }
         const pos = player.getPosition();
         if (pos) tileCollision?.update(pos);
-        tryEnableAtmosphereAndClouds();
     }
     updateTurboFov();
     // 局部坐标系下同步大气世界到 ECEF 的变换
-    if (localFrame) setAtmosphereWorldToECEFMatrix(viewer, localFrame.localToEcef);
+    syncAtmosphereFrame();
     viewer.render(time);
+    renderAttributions();
     stats.update();
     requestAnimationFrame(loop);
 }
 
 window.viewer = viewer;
-scheduleAttributionUpdate();
 void start();
-requestAnimationFrame(loop);
 
 // 页面卸载时释放资源
 window.addEventListener("beforeunload", () => {
     running = false;
-    window.cancelAnimationFrame(attributionFrame);
     tileCollision?.dispose();
     player?.destroy();
     stats.dom.remove();

@@ -1,3 +1,83 @@
+.lil-gui.root,
+.lil-gui.root .lil-gui {
+    --background-color: rgba(8, 12, 18, 0.8);
+    --text-color: #e8eef4;
+    --title-background-color: rgba(255, 255, 255, 0.055);
+    --title-text-color: #f4f7fb;
+    --widget-color: rgba(255, 255, 255, 0.09);
+    --hover-color: rgba(255, 255, 255, 0.15);
+    --focus-color: rgba(232, 160, 32, 0.28);
+    --number-color: #f0b64a;
+    --string-color: #79c0ff;
+    --font-size: 11px;
+    --input-font-size: 11px;
+    --font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --padding: 6px;
+    --spacing: 5px;
+    --widget-height: 24px;
+    --name-width: 45%;
+    --folder-indent: 10px;
+    --widget-border-radius: 5px;
+}
+
+.lil-gui.root {
+    color-scheme: dark;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: var(--background-color);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.lil-gui.root .lil-gui {
+    --background-color: transparent;
+}
+
+.lil-gui.root > .title {
+    border-radius: 9px 9px 0 0;
+    color: var(--title-text-color);
+    letter-spacing: 0.02em;
+}
+
+.lil-gui.root.closed > .title {
+    border-radius: 9px;
+}
+
+.lil-gui.root .lil-gui > .title {
+    color: rgba(232, 238, 244, 0.88);
+}
+
+.lil-gui.root .controller .name {
+    color: rgba(230, 238, 246, 0.78);
+    font-weight: 500;
+}
+
+.lil-gui.root input,
+.lil-gui.root .controller.option .display,
+.lil-gui.root .controller.function button {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.lil-gui.root input:focus-visible,
+.lil-gui.root button:focus-visible,
+.lil-gui.root select:focus-visible {
+    outline: 1px solid rgba(240, 192, 90, 0.9);
+    outline-offset: 1px;
+}
+
+.lil-gui.root .controller.number .slider .fill {
+    background: linear-gradient(90deg, rgba(232, 160, 32, 0.18), rgba(240, 192, 90, 0.34));
+}
+
+.lil-gui.root input[type="checkbox"]:checked {
+    color: #1a1408;
+    background: linear-gradient(180deg, #f0c05a, #e8a020);
+    border-color: #f6d48a;
+}
+
 .hud {
     position: fixed;
     left: 12px;

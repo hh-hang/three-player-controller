@@ -2361,9 +2361,13 @@ export class FootIK {
         if (!this.predictivePlacement) return "disabled";
         const state = this.legs[side].predictive;
         // d 为落点相对胶囊支撑面的上台高度，swing 为摆腿路径上的最大凸起。
-        const demand = `d=${state.debugPlaneLift.toFixed(3)} swing=${state.debugSwingLift.toFixed(3)}`;
-        if (!Number.isFinite(state.score)) return `${state.mode} ${demand}`;
-        return `${state.mode} ${demand} score=${state.score.toFixed(2)}`;
+        return `${state.mode} d=${state.debugPlaneLift.toFixed(2)} swing=${state.debugSwingLift.toFixed(2)}`;
+    }
+
+    /** 返回指定脚当前预测候选的调试评分；分数越小越好，无有效候选或预测关闭时返回 Infinity。 */
+    getPredictiveFootScore(side: FootIKSide): number {
+        if (!this.predictivePlacement) return Infinity;
+        return this.legs[side].predictive.score;
     }
 
 }

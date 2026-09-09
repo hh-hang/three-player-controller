@@ -1564,13 +1564,13 @@ function createDebugPanel() {
         straightPoleEnabled: options.straightPoleEnabled,
         pelvisOffset: 0,
         leftFootPhase: "",
-        leftFootLand: "--",
-        leftFootIKWeight: 0,
+        leftFootLandIK: "-- / 0.00",
         leftPrediction: "disabled",
+        leftPredictionScore: "--",
         rightFootPhase: "",
-        rightFootLand: "--",
-        rightFootIKWeight: 0,
+        rightFootLandIK: "-- / 0.00",
         rightPrediction: "disabled",
+        rightPredictionScore: "--",
         maxPelvisRaise: options.maxPelvisRaise,
         maxPelvisDrop: options.maxPelvisDrop,
         maxFootRaise: options.maxFootRaise,
@@ -1695,13 +1695,13 @@ function createDebugPanel() {
     const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
     footIKRuntimeFolder.add(params, "pelvisOffset").name("Pelvis Offset").decimals(2).listen().disable();
     footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
-    footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
-    footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "leftFootLandIK").name("Left Land / IK").listen().disable();
     footIKRuntimeFolder.add(params, "leftPrediction").name("Left Prediction").listen().disable();
+    footIKRuntimeFolder.add(params, "leftPredictionScore").name("Left Score").listen().disable();
     footIKRuntimeFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
-    footIKRuntimeFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
-    footIKRuntimeFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootLandIK").name("Right Land / IK").listen().disable();
     footIKRuntimeFolder.add(params, "rightPrediction").name("Right Prediction").listen().disable();
+    footIKRuntimeFolder.add(params, "rightPredictionScore").name("Right Score").listen().disable();
     footIKRuntimeFolder.close();
 
     const pelvisFolder = footIKFolder.addFolder("Pelvis");
@@ -1830,15 +1830,27 @@ function updateFootIKDebugPanel() {
     if (!footIK || !footIKDebugParams) return;
     footIKDebugParams.pelvisOffset = footIK.getPelvisOffset();
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
-    footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
-    footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
+    footIKDebugParams.leftFootLandIK = formatFootLandIK(
+        footIK.getFootTimeToLand("left"),
+        footIK.getFootIKWeight("left"),
+    );
     footIKDebugParams.leftPrediction = footIK.getPredictiveFootDebugText("left");
+    footIKDebugParams.leftPredictionScore = formatPredictionScore(footIK.getPredictiveFootScore("left"));
     footIKDebugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
-    footIKDebugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
-    footIKDebugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+    footIKDebugParams.rightFootLandIK = formatFootLandIK(
+        footIK.getFootTimeToLand("right"),
+        footIK.getFootIKWeight("right"),
+    );
     footIKDebugParams.rightPrediction = footIK.getPredictiveFootDebugText("right");
+    footIKDebugParams.rightPredictionScore = formatPredictionScore(footIK.getPredictiveFootScore("right"));
 }
 
-function formatFootLandTime(value) {
-    return Number.isFinite(value) ? `${value.toFixed(2)}s` : "--";
+function formatFootLandIK(landTime, ikWeight) {
+    const land = Number.isFinite(landTime) ? `${landTime.toFixed(2)}s` : "--";
+    const weight = Number.isFinite(ikWeight) ? ikWeight.toFixed(2) : "--";
+    return `${land} / ${weight}`;
+}
+
+function formatPredictionScore(value) {
+    return Number.isFinite(value) ? value.toFixed(2) : "--";
 }
