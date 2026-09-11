@@ -538,6 +538,10 @@ const footIK = new FootIK({
     },
 
     soleSkinThickness: 3,                               // skin-thickness compensation from the foot bone to the shoe sole
+    plantedHeightSpeed: 200,                            // planted-foot ground-follow speed (units/sec); Infinity snaps immediately
+    penetrationLiftSpeed: 200,                          // swing-foot penetration-lift speed (units/sec); Infinity lifts immediately
+    predictivePlacement: true,                          // enable predictive foot placement; default false keeps reactive Foot IK
+    straightPoleEnabled: true,                          // point knees forward while moving; default false keeps the animation pole
 });
 
 player.use(footIK);                                     // register the Foot IK plugin with the player controller

@@ -538,6 +538,10 @@ const footIK = new FootIK({
     },
 
     soleSkinThickness: 3,                               // 脚骨到鞋底的蒙皮厚度补偿
+    plantedHeightSpeed: 200,                            // 支撑脚贴地追随速度（单位/秒）；Infinity 为立刻贴地
+    penetrationLiftSpeed: 200,                          // 摆动脚陷入上抬速度（单位/秒）；Infinity 为立刻抬起
+    predictivePlacement: true,                          // 启用预测落脚；默认 false，关闭时沿用反应式贴地
+    straightPoleEnabled: true,                          // 移动时膝盖朝角色前方；默认 false，关闭则保留动画 pole
 });
 
 player.use(footIK);                                     // 将 Foot IK 插件注册到玩家控制器
