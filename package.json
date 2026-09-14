@@ -39,7 +39,7 @@
         "@types/three": "^0.184.0",
         "3d-tiles-renderer": "^0.4.24",
         "rimraf": "^6.0.0",
-        "tellux": "^0.2.0",
+        "tellux": "^0.3.0",
         "tsup": "^8.0.1",
         "typescript": "^5.9.3",
         "vite": "^7.3.0"
