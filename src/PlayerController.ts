@@ -300,7 +300,7 @@ export class playerController {
 
         const loader = new GLTFLoader();
         const dracoLoader = new DRACOLoader();
-        dracoLoader.setDecoderPath("https://unpkg.com/three@0.182.0/examples/jsm/libs/draco/gltf/");
+        dracoLoader.setDecoderPath("https://unpkg.com/three@0.186.0/examples/jsm/libs/draco/gltf/");
         loader.setDRACOLoader(dracoLoader);
         this._loader = loader;
         return loader;

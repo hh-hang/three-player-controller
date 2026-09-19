@@ -5,28 +5,28 @@ import {
     DoubleSide,
     Float32BufferAttribute,
     Timer,
-    EquirectangularReflectionMapping,
     Mesh,
     MeshStandardMaterial,
     PerspectiveCamera,
     Raycaster,
     Scene,
     SphereGeometry,
+    VSMShadowMap,
     Vector2,
     Vector3,
     WebGLRenderer,
 } from "three";
+import { SunLight } from "three/addons/lights/SunLight.js";
+import { Sky } from "three/addons/objects/Sky.js";
 import { MapControls } from "three/examples/jsm/Addons.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
 import { bindVehicleHintMode } from "./control-hints.js";
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
-import { CSM } from "three/examples/jsm/csm/CSM.js";
 import { createVolumeCloud, disposeVolumeCloud, updateVolumeCloud } from "./volumeCloud.js";
 
 let player;
@@ -42,7 +42,6 @@ let footIKDebugParams = null;
 let gui = null;
 
 let stats = null;
-let csm = null;
 let currentBlobUrl = null;
 let platform = null;
 let platformCloud = null;
@@ -65,8 +64,8 @@ let previewMesh = null;
 let previewMode = false;
 let previewHintEl = null;
 
-// CSM 基准参数
-const CSM_BASE = { maxFar: 30, lightNear: 0.1, lightFar: 50, lightMargin: 30, lightIntensity: 10 };
+const SUN_SHADOW_FAR = 3;
+const SUN_SHADOW_NORMAL_BIAS = 0.05;
 const previewRaycaster = new Raycaster();
 const previewMouse = new Vector2();
 
@@ -215,51 +214,6 @@ const VEHICLE_CONFIG = {
 
 init();
 
-function setupCSMMaterial(material) {
-    if (!material || !csm) return;
-    const mats = Array.isArray(material) ? material : [material];
-    mats.forEach((m) => {
-        csm.setupMaterial(m);
-        // 材质可能已在异步加载期间编译，注入 CSM 后必须刷新 shader。
-        m.needsUpdate = true;
-    });
-}
-
-function createCSM(shadowMapSize, scale) {
-    const c = new CSM({
-        maxFar: CSM_BASE.maxFar * scale,
-        cascades: 3,
-        mode: "practical",
-        parent: scene,
-        shadowMapSize,
-        shadowBias: -0.00001,
-        lightDirection: new Vector3(-1, -2, -1).normalize(),
-        lightIntensity: CSM_BASE.lightIntensity,
-        lightNear: CSM_BASE.lightNear * scale,
-        lightFar: CSM_BASE.lightFar * scale,
-        camera,
-        fade: true,
-        lightMargin: CSM_BASE.lightMargin * scale,
-    });
-    c.lights.forEach((light, index) => {
-        const biasMult = Math.pow(2, index);
-        light.shadow.bias = -0.0001 * biasMult;
-        light.shadow.normalBias = 0.002 * biasMult;
-    });
-    return c;
-}
-
-function recreateCSM(scale) {
-    csm.remove();
-    csm.dispose();
-    const maxTextureSize = renderer.capabilities.maxTextureSize;
-    csm = createCSM(Math.min(2048, maxTextureSize), scale);
-    // 重新绑定场景内所有网格的材质
-    scene.traverse((child) => {
-        if (child.isMesh) setupCSMMaterial(child.material);
-    });
-}
-
 function getModelScale(key) {
     return PLAYER_MODELS[key].scale * globalScale;
 }
@@ -298,7 +252,6 @@ async function spawnSceneSedan() {
         if (!child.isMesh) return;
         child.castShadow = true;
         child.receiveShadow = true;
-        setupCSMMaterial(child.material);
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         materials.forEach((material) => {
             if (!material) return;
@@ -447,9 +400,9 @@ async function init() {
     // 渲染器
     renderer = new WebGLRenderer({ antialias: true });
     renderer.setSize(cont.clientWidth, cont.clientHeight);
-    renderer.shadowMap.enabled = false;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = VSMShadowMap;
     renderer.toneMapping = ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1;
     renderer.setAnimationLoop(animate);
     cont.appendChild(renderer.domElement);
 
@@ -467,30 +420,31 @@ async function init() {
     controls.maxPolarAngle = Math.PI / 2;
     controls.target.set(pos.x, pos.y, pos.z + 1);
 
-    const maxTextureSize = renderer.capabilities.maxTextureSize;
-    const shadowMapSize = Math.min(2048, maxTextureSize);
-    // 级联阴影
-    csm = createCSM(shadowMapSize, 1);
-    csm.lights.forEach((light, index) => {
-        const biasMult = Math.pow(2, index);
-        light.shadow.bias = -0.0001 * biasMult;
-        light.shadow.normalBias = 0.002 * biasMult;
-    });
+    // 太阳光
+    const sunLight = new SunLight(0xffffff, 6);
+    sunLight.position.set(16, 48, 24);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.setScalar(Math.min(2048, renderer.capabilities.maxTextureSize));
+    sunLight.shadow.camera.near = 0.1;
+    sunLight.shadow.camera.far = SUN_SHADOW_FAR;
+    sunLight.shadow.normalBias = SUN_SHADOW_NORMAL_BIAS;
+    scene.add(sunLight);
 
     // 环境光
     const ambient = new AmbientLight(0xffffff, 5);
     scene.add(ambient);
 
-    // 背景
-    new HDRLoader().load(
-        "./img/env.hdr",
-        (texture) => {
-            texture.mapping = EquirectangularReflectionMapping;
-            scene.background = texture;
-        },
-        undefined,
-        (err) => console.warn("HDR 加载失败：", err)
-    );
+    // 天空
+    const sky = new Sky();
+    sky.scale.setScalar(450000);
+    const skyUniforms = sky.material.uniforms;
+    skyUniforms["turbidity"].value = 10;
+    skyUniforms["rayleigh"].value = 2;
+    skyUniforms["mieCoefficient"].value = 0.001;
+    skyUniforms["mieDirectionalG"].value = 0.99;
+    skyUniforms["sunPosition"].value.copy(sunLight.position.clone().normalize());
+
+    scene.add(sky);
 
     // 帧率显示
     stats = new Stats();
@@ -535,12 +489,10 @@ async function init() {
     bindVehicleHintMode(player);
     attachFootIK();
 
-    // 先完成角色材质的 CSM 注入，避免等待车辆时用非 CSM shader 提前编译。
     player.getPlayerModel()?.traverse((child) => {
         if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
-            setupCSMMaterial(child.material);
         }
     });
 
@@ -596,7 +548,6 @@ async function initGLBScene(url, modelScale = [10, 10, 10]) {
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
-                setupCSMMaterial(child.material);
             }
         });
         scene.add(model);
@@ -770,8 +721,6 @@ async function onPreviewDblClick() {
     initPos.y += 180 * spawnScale * 0.75;
     exitPreviewMode();
 
-    recreateCSM(globalScale);
-
     player = new playerController();
     const sceneModel = scene.getObjectByName("sceneGLB");
     await player.init({
@@ -804,7 +753,6 @@ async function onPreviewDblClick() {
         if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
-            setupCSMMaterial(child.material);
         }
     });
 }
@@ -821,7 +769,6 @@ function animate(timestamp) {
 
     updateDynamicPlatforms();
 
-    csm?.update();
     updateFootIKDebugPanel();
 
     renderer.render(scene, camera);
@@ -956,7 +903,6 @@ function initGUI() {
                 if (!child.isMesh) return;
                 child.castShadow = true;
                 child.receiveShadow = true;
-                setupCSMMaterial(child.material);
                 if (modelKey !== "ual") return;
                 const materials = Array.isArray(child.material) ? child.material : [child.material];
                 materials.forEach((material) => {

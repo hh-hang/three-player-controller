@@ -10,7 +10,6 @@ import {
 import { MapControls } from "three/examples/jsm/Addons.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { playerController } from "../src/PlayerController";
 import { SplatMesh, SparkRenderer } from "@sparkjsdev/spark";
@@ -64,17 +63,6 @@ async function init() {
     // 环境光
     const ambient = new AmbientLight(0xffffff, 5);
     scene.add(ambient);
-
-    // 背景
-    new HDRLoader().load(
-        "./img/env.hdr",
-        (texture) => {
-            texture.mapping = EquirectangularReflectionMapping;
-            scene.background = texture;
-        },
-        undefined,
-        (err) => console.warn("HDR 加载失败：", err)
-    );
 
     // 帧率
     stats = new Stats();
@@ -185,10 +173,10 @@ function animateToScale(targetScale, duration = 0.5) {
 function initGltfLoader() {
     gltfLoader = new GLTFLoader();
     const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/draco/");
+    dracoLoader.setDecoderPath("https://unpkg.com/three@0.186.0/examples/jsm/libs/draco/");
     gltfLoader.setDRACOLoader(dracoLoader);
     const ktx2Loader = new KTX2Loader();
-    ktx2Loader.setTranscoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/basis/");
+    ktx2Loader.setTranscoderPath("https://unpkg.com/three@0.186.0/examples/jsm/libs/basis/");
     ktx2Loader.detectSupport(renderer);
     gltfLoader.setKTX2Loader(ktx2Loader);
 }

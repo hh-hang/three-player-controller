@@ -104,11 +104,11 @@ async function init() {
     const gltfLoader = new GLTFLoader();
 
     const draco = new DRACOLoader();
-    draco.setDecoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/draco/");
+    draco.setDecoderPath("https://unpkg.com/three@0.186.0/examples/jsm/libs/draco/");
     gltfLoader.setDRACOLoader(draco);
 
     const ktx2 = new KTX2Loader();
-    ktx2.setTranscoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/basis/");
+    ktx2.setTranscoderPath("https://unpkg.com/three@0.186.0/examples/jsm/libs/basis/");
     ktx2.detectSupport(renderer);
     gltfLoader.setKTX2Loader(ktx2);
 

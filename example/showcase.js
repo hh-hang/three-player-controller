@@ -6,7 +6,6 @@ import {
     Timer,
     Color,
     CylinderGeometry,
-    DirectionalLight,
     DoubleSide,
     ExtrudeGeometry,
     Float32BufferAttribute,
@@ -28,6 +27,7 @@ import {
     WebGLRenderer,
 } from "three";
 import { Sky } from "three/addons/objects/Sky.js";
+import { SunLight } from "three/addons/lights/SunLight.js";
 import { MapControls } from "three/examples/jsm/Addons.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
@@ -38,6 +38,8 @@ import { bindVehicleHintMode } from "./control-hints.js";
 
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
+const SUN_SHADOW_FAR = 30;
+const SUN_SHADOW_NORMAL_BIAS = 0.05;
 
 const DECK_Y = -0.06;
 const DECK_THICK = 0.12;
@@ -161,6 +163,7 @@ let camera;
 let renderer;
 let controls;
 let player;
+let sunLight;
 let footIK;
 let footIKDebugParams;
 let stats;
@@ -168,6 +171,7 @@ const kinematicPlatforms = [];
 let trapScaleRange = null; // 收腰段：wideWestX 处 scale=1，westX 处 scale=0.1
 const glowPortals = [];
 let zoneScale = 1; // 当前场景总缩放（1 → MINI_SCALE）
+let sunShadowScale = Number.NaN;
 const scaleGateWorldPos = new Vector3(); // 缩放判定用的世界坐标缓冲
 
 init();
@@ -214,29 +218,25 @@ async function init() {
     // 环境光
     scene.add(new AmbientLight(0xffffff, 1.5));
 
-    // 平行光
-    const sun = new DirectionalLight(0xffffff, 2);
-    sun.position.set(16, 48, 24);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 220;
-    sun.shadow.camera.left = -90;
-    sun.shadow.camera.right = 24;
-    sun.shadow.camera.top = 70;
-    sun.shadow.camera.bottom = -70;
-    sun.shadow.bias = -0.0005;
-    scene.add(sun);
+    // 太阳光
+    sunLight = new SunLight(0xffffff, 2);
+    sunLight.position.set(16, 48, 24);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.setScalar(2048);
+    sunLight.shadow.camera.near = 0.1;
+    updateSunShadowScale();
+    scene.add(sunLight);
 
     const sky = new Sky();
     sky.scale.setScalar(450000);
-    scene.add(sky);
     const skyUniforms = sky.material.uniforms;
     skyUniforms["turbidity"].value = 10;
     skyUniforms["rayleigh"].value = 2;
     skyUniforms["mieCoefficient"].value = 0.001;
     skyUniforms["mieDirectionalG"].value = 0.99;
-    skyUniforms["sunPosition"].value.copy(sun.position.clone().normalize());
+    skyUniforms["sunPosition"].value.copy(sunLight.position.clone().normalize());
+
+    scene.add(sky);
 
     // 测试场景
     const prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
@@ -779,6 +779,16 @@ function isNearScale(a, b) {
     return Math.abs(a - b) <= Math.max(Math.abs(b) * 1e-4, 1e-8);
 }
 
+// 缩小场景时同步收紧阴影距离与法线偏移，保持角色附近的阴影密度。
+function updateSunShadowScale(scale = zoneScale) {
+    if (!sunLight || isNearScale(sunShadowScale, scale)) return;
+    const clampedScale = Math.max(MINI_SCALE, Math.min(1, scale));
+    sunLight.shadow.camera.far = SUN_SHADOW_FAR * clampedScale;
+    sunLight.shadow.normalBias = SUN_SHADOW_NORMAL_BIAS * clampedScale;
+    sunLight.shadow.needsUpdate = true;
+    sunShadowScale = clampedScale;
+}
+
 // 收腰段 X：wideWestX → 1，westX → MINI_SCALE；宽矩形段保持 1
 function zoneScaleFromX(x) {
     if (!trapScaleRange) return 1;
@@ -844,6 +854,7 @@ function updateTrapScale() {
 
     zoneScale = zoneScaleFromX(pos.x);
     applyPlayerScale(playerScaleForZone(zoneScale));
+    updateSunShadowScale(zoneScale);
 
     const vehicles = player.getAllVehicles?.() ?? [];
     if (!vehicles.length || !player.setVehicleScale) return;
