@@ -75,18 +75,24 @@ const viewer = new tellux.Viewer(container, {
     dracoDecoderPath: "https://unpkg.com/three@0.186.0/examples/jsm/libs/draco/gltf/",
     useDefaultRenderLoop: false,
     camera: {
-        longitude: CITIES.newyork.longitude,
-        latitude: CITIES.newyork.latitude,
-        height: 80,
-        heading: 0,
-        pitch: -20,
-        near: 0.1,
+        destination: {
+            longitude: CITIES.newyork.longitude,
+            latitude: CITIES.newyork.latitude,
+            height: 80,
+        },
+        orientation: {
+            heading: 0,
+            pitch: -20,
+        },
+        projection: {
+            near: 0.1,
+        },
     },
     scene: {
         atmosphere: {
             show: true,
             lighting: {
-                mode: "post-process",
+                mode: "light-source",
                 sunLight: true,
                 skyLight: true,
             },
@@ -100,20 +106,20 @@ const viewer = new tellux.Viewer(container, {
             show: true,
             coverage: 0.35,
         },
-        postProcess: {
-            lensFlare: { enabled: false },
-            smaa: { enabled: false },
-        },
+    },
+    postProcess: {
+        lensFlare: { enabled: false },
+        smaa: { enabled: false },
     },
 });
 
 // 关闭默认地球交互，改由人物控制器接管相机
 viewer.controls.enabled = false;
 viewer.camera.allowUnderground = true;
-viewer.tileset.group.visible = false;
+viewer.globe.show = false;
 
 // 控制器
-const orbitControls = new OrbitControls(viewer.camera.threeCamera, viewer.renderer.domElement);
+const orbitControls = new OrbitControls(viewer.camera.raw, viewer.renderer.raw.domElement);
 orbitControls.enablePan = false;
 
 // 局部坐标轴
@@ -123,7 +129,7 @@ localAxes.visible = false;
 localAxes.renderOrder = 10;
 localAxes.material.depthTest = false;
 localAxes.material.depthWrite = false;
-viewer.scene.threeScene.add(localAxes);
+viewer.scene.raw.add(localAxes);
 
 // 帧率
 const stats = new Stats();
@@ -143,14 +149,6 @@ let player = null;
 let skipCollisionAfterRebase = false;
 let running = true;
 let turboMode = false;
-
-// 局部坐标系下每帧把世界到 ECEF 的矩阵写进大气。
-function syncAtmosphereFrame() {
-    const atmosphere = viewer.atmosphere;
-    atmosphere.aerialPerspectiveEffect.worldToECEFMatrix.copy(localFrame.localToEcef);
-    atmosphere.cloudsEffect.worldToECEFMatrix.copy(localFrame.localToEcef);
-}
-
 // 以人物附近 ECEF 点建立局部 Y-up 坐标系，走远后 rebase。
 class LocalFrameManager {
     // 建局部 ENU 根节点，并按出生点设原点
@@ -403,8 +401,8 @@ function renderAttributions() {
 // 创建或更新局部坐标系
 function ensureLocalFrame(origin) {
     if (!localFrame) {
-        localFrame = new LocalFrameManager(viewer.tileset.ellipsoid, origin);
-        viewer.scene.threeScene.add(localFrame.group);
+        localFrame = new LocalFrameManager(viewer.globe.ellipsoid, origin);
+        viewer.scene.raw.add(localFrame.group);
         return;
     }
     localFrame.setOrigin(origin);
@@ -421,7 +419,7 @@ function syncTurboMode() {
 
 // 极速时拉宽视野
 function updateTurboFov() {
-    const camera = viewer.camera.threeCamera;
+    const camera = viewer.camera.raw;
     const targetFov = turboMode ? 120 : 60;
     if (Math.abs(camera.fov - targetFov) > 0.01) {
         camera.fov += (targetFov - camera.fov) * 0.01;
@@ -432,7 +430,9 @@ function updateTurboFov() {
 // 切换城市或重新出生时悬停，等待周围地形加载
 function respawn() {
     ensureLocalFrame(CITIES[currentCity()]);
-    viewer.clock.hourUTC = CITIES[currentCity()].hourUTC;
+    const currentTime = viewer.clock.currentTime;
+    currentTime.setUTCHours(CITIES[currentCity()].hourUTC, 0, 0, 0);
+    viewer.clock.currentTime = currentTime;
     player?.reset(spawnLocalPosition());
     if (player && !player.isFlying) player.setInput({ toggleFly: true });
     player?.setSkipCapsuleCollision(true);
@@ -442,13 +442,14 @@ function respawn() {
 // 加载 Google Photorealistic 3D Tiles
 function loadPhotorealisticTiles() {
     ensureLocalFrame(CITIES[currentCity()]);
-    activeLayer = viewer.load3DTileset({
-        type: "cesium-ion",
+    activeLayer = viewer.tilesets.add({
         id: "photorealistic-3d-tiles",
-        assetId: GOOGLE_PHOTOREALISTIC_ASSET_ID,
-        apiToken: CESIUM_ION_TOKEN,
+        source: {
+            type: "cesium-ion",
+            assetId: GOOGLE_PHOTOREALISTIC_ASSET_ID,
+            apiToken: CESIUM_ION_TOKEN,
+        },
         creasedNormals: true,
-        materialMode: "unlit",
     });
     localFrame.group.add(activeLayer.tileset.group);
     localFrame.group.updateMatrixWorld(true);
@@ -460,8 +461,8 @@ async function initPlayer() {
     const gltf = await loader.loadAsync("./glb/josh.glb");
     player = new playerController();
     await player.init({
-        scene: viewer.scene.threeScene,
-        camera: viewer.camera.threeCamera,
+        scene: viewer.scene.raw,
+        camera: viewer.camera.raw,
         controls: orbitControls,
         initPos: spawnLocalPosition(),
         minCamDistance: 5,
@@ -493,8 +494,6 @@ async function initPlayer() {
     });
     player.setPlayerCapsuleDebug(guiParams.playerCapsuleDebug);
     player.setColliderDebug(guiParams.colliderDebug);
-    // 启用实际太阳光、天空光和环境反射。
-    viewer.atmosphere.setPostProcessMaterialLights(true);
 }
 
 // 创建调试面板
@@ -554,7 +553,7 @@ function loop(time) {
     }
     updateTurboFov();
     // 局部坐标系下同步大气世界到 ECEF 的变换
-    syncAtmosphereFrame();
+    viewer.scene.atmosphere.setWorldToECEFMatrix(localFrame.localToEcef);
     viewer.render(time);
     renderAttributions();
     stats.update();
