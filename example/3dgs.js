@@ -115,7 +115,7 @@ async function init() {
             flyHoverUpAnim: "flyHoverUp",
             flyHoverDownAnim: "flyHoverDown",
             drivingAnim: "Driving_Loop",
-            headBoneName: "mixamorigHead",
+            firstPersonCameraOffset: new Vector3(0, 3, 0),
             speed: 150,
             flySpeed: 1000,
             jumpHeight: 400,
@@ -129,6 +129,14 @@ async function init() {
         ],
         enableOverShoulderView: true,
     });
+
+    player.onViewChange = (mode) => {
+        if (mode) {
+            player.getPlayerModel().visible = false;
+        } else {
+            player.getPlayerModel().visible = true;
+        }
+    } 
 
     window.addEventListener("resize", onWindowResize, false);
     // 监听按键
