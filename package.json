@@ -24,10 +24,11 @@
     },
     "scripts": {
         "dev": "vite",
+        "dev:tiles": "vite --mode tiles",
         "build": "tsup",
         "clean": "rimraf dist",
         "prepare": "npm run build",
-        "build:example": "vite build"
+        "build:example": "vite build && vite build --mode tiles"
     },
     "peerDependencies": {
         "three": ">=0.159.0",
@@ -41,6 +42,7 @@
         "rimraf": "^6.0.0",
         "tellux": "^0.3.0",
         "three": "0.186.0",
+        "three184": "npm:three@0.184.0",
         "tsup": "^8.0.1",
         "typescript": "^5.9.3",
         "vite": "^7.3.0"

@@ -72,7 +72,7 @@ const guiParams = {
 
 // Tellux 视图
 const viewer = new tellux.Viewer(container, {
-    dracoDecoderPath: "https://unpkg.com/three@0.186.0/examples/jsm/libs/draco/gltf/",
+    dracoDecoderPath: "https://unpkg.com/three@0.184.0/examples/jsm/libs/draco/gltf/",
     useDefaultRenderLoop: false,
     camera: {
         destination: {
