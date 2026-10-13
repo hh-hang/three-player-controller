@@ -115,99 +115,111 @@ export class CharacterMovement {
         let groundPoint: THREE.Vector3 | undefined = dynamicHit?.point ?? bestHit?.point;
         let usedShapeGround = false;
 
-        // 中心射线没有近距离支撑时，用带宽度的体积探测覆盖细缝两侧。
-        const rayGroundDistance = groundPoint
-            ? c.playerCapsule.position.y - groundPoint.y
-            : Infinity;
-        const groundCapsuleInfo = c.playerCapsule.capsuleInfo;
+        if (c.enableGroundVolumeProbe) {
+            // 中心射线没有近距离支撑时，用带宽度的体积探测覆盖细缝两侧。
+            const rayGroundDistance = groundPoint
+                ? c.playerCapsule.position.y - groundPoint.y
+                : Infinity;
+            const groundCapsuleInfo = c.playerCapsule.capsuleInfo;
 
-        // 从胶囊下端球心开始向下探测。
-        this.groundProbeStart.copy(groundCapsuleInfo.segment.end)
-            .applyMatrix4(c.playerCapsule.matrixWorld);
-        this.groundProbeDown.copy(c.upVector).negate();
+            // 从胶囊下端球心开始向下探测。
+            this.groundProbeStart.copy(groundCapsuleInfo.segment.end)
+                .applyMatrix4(c.playerCapsule.matrixWorld);
+            this.groundProbeDown.copy(c.upVector).negate();
 
-        const lowerCenterOffset = this.groundProbeOffset
-            .subVectors(c.playerCapsule.position, this.groundProbeStart)
-            .dot(c.upVector);
-        const maxProbeDistance = Math.max(0, c.maxH - lowerCenterOffset);
-        const sensorRadius = groundCapsuleInfo.radius * GROUND_SENSOR_RADIUS_RATIO;
+            const lowerCenterOffset = this.groundProbeOffset
+                .subVectors(c.playerCapsule.position, this.groundProbeStart)
+                .dot(c.upVector);
+            const maxProbeDistance = Math.max(0, c.maxH - lowerCenterOffset);
+            const sensorRadius = groundCapsuleInfo.radius * GROUND_SENSOR_RADIUS_RATIO;
 
-        // 近距离中心射线仍是快速路径；只有射线错过或命中过远时才执行体积查询。
-        const useShapeProbe = rayGroundDistance > c.maxH;
-        if (useShapeProbe) {
-            let shapeDistance = Infinity;
-            let shapeEntry: KinematicColliderEntry | null = null;
-            let shapeDynamicHit: DynamicGroundHit | null = null;
+            // 近距离中心射线仍是快速路径；只有射线错过或命中过远时才执行体积查询。
+            const useShapeProbe = rayGroundDistance > c.maxH;
+            if (useShapeProbe) {
+                let shapeDistance = Infinity;
+                let shapeEntry: KinematicColliderEntry | null = null;
+                let shapeDynamicHit: DynamicGroundHit | null = null;
 
-            // 静态、运动学及已登记的动态网格都通过 BVH 生成候选支撑面，保留最近命中。
-            for (const col of c.collisionWorld.query({ mask: CHARACTER_QUERY_MASK })) {
-                if (col.shape.kind !== "mesh") continue;
-                const hit = probeMeshGround(
+                // 静态、运动学及已登记的动态网格都通过 BVH 生成候选支撑面，保留最近命中。
+                for (const col of c.collisionWorld.query({ mask: CHARACTER_QUERY_MASK })) {
+                    if (col.shape.kind !== "mesh") continue;
+                    const hit = probeMeshGround(
+                        this.groundProbeStart,
+                        this.groundProbeDown,
+                        maxProbeDistance,
+                        sensorRadius,
+                        GROUND_SUPPORT_NORMAL_Y,
+                        col.shape.mesh,
+                        this.groundProbeTemps,
+                    );
+                    if (!hit || hit.distance >= shapeDistance) continue;
+                    shapeDistance = hit.distance;
+                    this.shapeGroundPoint.copy(hit.point);
+                    this.shapeGroundNormal.copy(hit.normal);
+
+                    // 保存运动学平台归属。
+                    shapeEntry = col.motion === "kinematic"
+                        ? col.userData as KinematicColliderEntry
+                        : null;
+                    shapeDynamicHit = null;
+                }
+
+                // 动态球和动态盒使用解析形状查询，再与网格结果竞争最近支撑面。
+                const dynamicVolumeHit = c.dynamics.probeGroundVolume(
                     this.groundProbeStart,
                     this.groundProbeDown,
                     maxProbeDistance,
                     sensorRadius,
                     GROUND_SUPPORT_NORMAL_Y,
-                    col.shape.mesh,
-                    this.groundProbeTemps,
                 );
-                if (!hit || hit.distance >= shapeDistance) continue;
-                shapeDistance = hit.distance;
-                this.shapeGroundPoint.copy(hit.point);
-                this.shapeGroundNormal.copy(hit.normal);
+                if (dynamicVolumeHit) {
+                    const dynamicDistance = this.groundProbeOffset
+                        .subVectors(dynamicVolumeHit.point, this.groundProbeStart)
+                        .dot(this.groundProbeDown);
+                    if (dynamicDistance < shapeDistance) {
+                        shapeDistance = dynamicDistance;
+                        this.shapeGroundPoint.copy(dynamicVolumeHit.point);
+                        this.shapeGroundNormal.copy(dynamicVolumeHit.normal);
+                        shapeEntry = null;
 
-                // 保存运动学平台归属。
-                shapeEntry = col.motion === "kinematic"
-                    ? col.userData as KinematicColliderEntry
-                    : null;
-                shapeDynamicHit = null;
-            }
+                        // 保存动态刚体归属。
+                        shapeDynamicHit = dynamicVolumeHit;
+                    }
+                }
 
-            // 动态球和动态盒使用解析形状查询，再与网格结果竞争最近支撑面。
-            const dynamicVolumeHit = c.dynamics.probeGroundVolume(
-                this.groundProbeStart,
-                this.groundProbeDown,
-                maxProbeDistance,
-                sensorRadius,
-                GROUND_SUPPORT_NORMAL_Y,
-            );
-            if (dynamicVolumeHit) {
-                const dynamicDistance = this.groundProbeOffset
-                    .subVectors(dynamicVolumeHit.point, this.groundProbeStart)
-                    .dot(this.groundProbeDown);
-                if (dynamicDistance < shapeDistance) {
-                    shapeDistance = dynamicDistance;
-                    this.shapeGroundPoint.copy(dynamicVolumeHit.point);
-                    this.shapeGroundNormal.copy(dynamicVolumeHit.normal);
-                    shapeEntry = null;
-
-                    // 保存动态刚体归属。
-                    shapeDynamicHit = dynamicVolumeHit;
+                if (Number.isFinite(shapeDistance)) {
+                    // 用体积探测结果替换失效射线，同时保持原有贴地、坡度和平台逻辑的输入格式。
+                    groundPoint = this.shapeGroundPoint;
+                    bestHit = undefined;
+                    dynamicHit = shapeDynamicHit;
+                    hitEntry = shapeEntry;
+                    usedShapeGround = true;
                 }
             }
 
-            if (Number.isFinite(shapeDistance)) {
-                // 用体积探测结果替换失效射线，同时保持原有贴地、坡度和平台逻辑的输入格式。
-                groundPoint = this.shapeGroundPoint;
-                bestHit = undefined;
-                dynamicHit = shapeDynamicHit;
-                hitEntry = shapeEntry;
-                usedShapeGround = true;
-            }
+            // 调试圆柱挂在 capsule 下，传局部尺寸，由父级 scale 变换到世界尺度。
+            const capsuleScale = c.playerCapsule.scale;
+            const sy = capsuleScale.y || 1;
+            const sxz = Math.max(1e-6, Math.min(capsuleScale.x || 1, capsuleScale.z || 1));
+            this.debug.updateGroundSensor(
+                this.groundProbeStart,
+                this.groundProbeDown,
+                maxProbeDistance / sy,
+                sensorRadius / sxz,
+                useShapeProbe,
+                usedShapeGround,
+            );
+        } else {
+            // 关闭体积探测时隐藏传感区调试体。
+            this.debug.updateGroundSensor(
+                this.groundProbeStart,
+                this.groundProbeDown,
+                0,
+                0,
+                false,
+                false,
+            );
         }
-
-        // 调试圆柱挂在 capsule 下，传局部尺寸，由父级 scale 变换到世界尺度。
-        const capsuleScale = c.playerCapsule.scale;
-        const sy = capsuleScale.y || 1;
-        const sxz = Math.max(1e-6, Math.min(capsuleScale.x || 1, capsuleScale.z || 1));
-        this.debug.updateGroundSensor(
-            this.groundProbeStart,
-            this.groundProbeDown,
-            maxProbeDistance / sy,
-            sensorRadius / sxz,
-            useShapeProbe,
-            usedShapeGround,
-        );
         this.debug.updateGroundProbe(
             c.groundRaycaster.ray.origin,
             groundPoint ?? null,

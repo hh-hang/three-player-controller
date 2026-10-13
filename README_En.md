@@ -203,6 +203,7 @@ await player.init({
     // Other settings (optional)
     mouseSensitivity: 5,                                // mouse sensitivity; default 5
     timeScale: 1,                                       // time scale; <1 slow motion, >1 fast-forward; default 1
+    enableGroundVolumeProbe: true,                      // whether downward ground volume probe is enabled; default true
 
     keyMap: {                                           // custom key map; use one key, multiple keys, or null to disable
         forward: ["KeyW", "ArrowUp"],                   // move forward
@@ -632,6 +633,7 @@ See the full example in [`example/footIK.js`](https://github.com/hh-hang/three-p
 | `setEnableZoom(v)` | Enable / disable mouse-wheel zoom. |
 | `setOverShoulderView(v)` | Enable / disable over-shoulder view. |
 | `setEnableToward(v)` | Enable / disable mouse-driven facing. |
+| `setEnableGroundVolumeProbe(v)` | Enable / disable downward ground volume probe. |
 | `setSkipCapsuleCollision(v)` | Temporarily skip player capsule collision. |
 | `changeView()` | Switch first-person / third-person view. |
 | `setFirstPersonCamera(v?)` | Enter first-person view directly. |
@@ -795,6 +797,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // triggered when facing / vi
 | `springCameraTime` | `number` | No | `0.05` | Spring smoothing time in seconds; smaller values follow more tightly. |
 | `camLookAtHeightRatio` | `number` | No | `0.8` | Third-person camera target height ratio (0=capsule bottom, 1=top). |
 | `timeScale` | `number` | No | `1` | Time scale; <1 slow motion, >1 fast-forward. |
+| `enableGroundVolumeProbe` | `boolean` | No | `true` | Whether downward ground volume probe is enabled; when the center ray misses nearby support, a cylindrical sensor covers gaps on either side. |
 | `keyMap` | `KeyMap` | No | Default bindings | Custom key mapping; see [Custom Key Bindings](#custom-key-bindings). |
 
 ## `PlayerModelOptions`

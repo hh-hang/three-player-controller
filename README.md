@@ -203,6 +203,7 @@ await player.init({
     // 其他（可选）
     mouseSensitivity: 5,                                // 鼠标灵敏度，默认 5
     timeScale: 1,                                       // 时间缩放系数，<1 慢动作，>1 快进，默认 1
+    enableGroundVolumeProbe: true,                      // 是否启用向下体积地面探测，默认 true
 
     keyMap: {                                           // 自定义键位；可传单键、数组多绑或 null 禁用
         forward: ["KeyW", "ArrowUp"],                   // 前进
@@ -632,6 +633,7 @@ footIK.dispose();                         // 释放 Foot IK 创建的调试对�
 | `setEnableZoom(v)` | 开关滚轮缩放。 |
 | `setOverShoulderView(v)` | 开关过肩视角。 |
 | `setEnableToward(v)` | 开关鼠标驱动朝向。 |
+| `setEnableGroundVolumeProbe(v)` | 开关向下体积地面探测。 |
 | `setSkipCapsuleCollision(v)` | 临时跳过人物胶囊碰撞。 |
 | `changeView()` | 切换第一 / 第三人称。 |
 | `setFirstPersonCamera(v?)` | 直接进入第一人称。 |
@@ -795,6 +797,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `springCameraTime` | `number` | 否 | `0.05` | 弹簧平滑时间（秒），越小跟随越紧。 |
 | `camLookAtHeightRatio` | `number` | 否 | `0.8` | 第三人称相机看向点高度比例（0=胶囊底部，1=顶部）。 |
 | `timeScale` | `number` | 否 | `1` | 时间缩放系数，<1 慢动作，>1 快进。 |
+| `enableGroundVolumeProbe` | `boolean` | 否 | `true` | 是否启用向下体积地面探测；中心射线未命中近距离支撑时，用带宽度的圆柱传感区覆盖细缝两侧。 |
 | `keyMap` | `KeyMap` | 否 | 默认键位 | 自定义键位映射，详见[自定义键位](#自定义键位)。 |
 
 ## `PlayerModelOptions`

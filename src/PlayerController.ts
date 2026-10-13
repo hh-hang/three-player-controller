@@ -98,6 +98,11 @@ export class playerController {
     skipCapsuleCollision = false;
     /** 启用朝向输入。 */
     enableToward = true;
+    /**
+     * 是否启用向下体积地面探测。
+     * 中心射线未命中近距离支撑时，用带宽度的圆柱传感区覆盖细缝两侧。
+     */
+    enableGroundVolumeProbe = true;
 
     // ==================== 玩家物体 ====================
     /** 玩家碰撞胶囊。 */
@@ -272,6 +277,7 @@ export class playerController {
         this.enableOverShoulderView = opts.enableOverShoulderView ?? this.enableOverShoulderView;
         this.isFirstPerson = opts.isFirstPerson ?? this.isFirstPerson;
         this.timeScale = opts.timeScale ?? this.timeScale;
+        this.enableGroundVolumeProbe = opts.enableGroundVolumeProbe ?? this.enableGroundVolumeProbe;
 
         // 自定义键位
         if (opts.keyMap) this.input.buildKeyMap(opts.keyMap);
@@ -902,6 +908,8 @@ export class playerController {
     setPlayerFlySpeed(flySpeed: number) { this.playerFlySpeed = flySpeed * this.playerModelConfig.scale; }
     /** 设置朝向开关。 */
     setEnableToward(v: boolean) { this.enableToward = v; }
+    /** 设置向下体积地面探测开关。 */
+    setEnableGroundVolumeProbe(v: boolean) { this.enableGroundVolumeProbe = v; }
 
     // --- 相机参数 ---
     /** 设置相机最近距。 */

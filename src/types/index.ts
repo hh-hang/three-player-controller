@@ -182,6 +182,11 @@ export type PlayerControllerOptions = {
     springCameraTime?: number;
     /** 时间缩放系数；小于 1 为慢动作，大于 1 为快进，默认 1。 */
     timeScale?: number;
+    /**
+     * 是否启用向下体积地面探测。
+     * 中心射线未命中近距离支撑时，用带宽度的圆柱传感区覆盖细缝两侧；默认 true。
+     */
+    enableGroundVolumeProbe?: boolean;
     /** 自定义键位映射。 */
     keyMap?: KeyMap;
 };

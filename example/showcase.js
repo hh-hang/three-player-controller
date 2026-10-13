@@ -1560,6 +1560,7 @@ function createDebugPanel() {
         playerAcceleration: player.playerAcceleration,
         playerDeceleration: player.playerDeceleration,
         timeScale: player.timeScale,
+        enableGroundVolumeProbe: player.enableGroundVolumeProbe,
         minCamDistance: toBasePlayerValue(player.cam.minDist),
         maxCamDistance: toBasePlayerValue(player.cam.maxDist),
         camLookAtHeightRatio: player.cam.lookAtHeightRatio,
@@ -1652,6 +1653,9 @@ function createDebugPanel() {
     });
     movementFolder.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").decimals(2).onChange((value) => {
         if (player) player.timeScale = value;
+    });
+    movementFolder.add(params, "enableGroundVolumeProbe").name("Ground Volume Probe").onChange((value) => {
+        player?.setEnableGroundVolumeProbe(value);
     });
     movementFolder.close();
 
