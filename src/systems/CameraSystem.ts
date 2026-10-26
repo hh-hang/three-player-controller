@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { playerController } from "../PlayerController";
+import { dampCameraHeading } from "../utils/cameraHeading";
 
 export class CameraSystem {
     private ctrl: playerController; // 主控制器引用
@@ -19,13 +20,25 @@ export class CameraSystem {
 
     enableSpringCamera = false;
     springCameraTime = 0.05;
-    vehicleTurnLerp = 0.01;
+    followPlayerDirection = false; // 移动时相机跟随人物朝向
+    playerDirectionFollowSpeed = 3; // 朝向跟随响应速度，越大越快
     private _springVelocity = new THREE.Vector3();
     private _springResult = new THREE.Vector3();
+    private playerForward = new THREE.Vector3();
+    private playerRotation = new THREE.Quaternion();
     private zoomWheelElement: HTMLElement | SVGElement | null = null;
     private readonly boundZoomWheel: EventListener = (event) => this.onZoomWheel(event as WheelEvent);
     private _flySprintMaxDistBoost = false;
     private _flySprintSavedMaxDist = 0;
+    private positionRequest: number | null = null;
+    private savedControls: {
+        parent: THREE.Object3D | null;
+        rotationOrder: THREE.EulerOrder;
+        view: THREE.PerspectiveCamera["view"];
+        controls: Pick<playerController["controls"],
+            "enabled" | "enablePan" | "enableRotate" | "enableZoom" | "rotateSpeed"
+            | "maxPolarAngle" | "minDistance" | "mouseButtons" | "touches">;
+    } | null = null;
 
     raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3()); // 相机碰撞射线
     centerRay = new THREE.Raycaster(); // 屏幕中心射线
@@ -35,6 +48,53 @@ export class CameraSystem {
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
         (this.raycaster as any).firstHitOnly = true;
+    }
+
+    /** 只在开始接管时记录应用配置；重复初始化不覆盖快照。 */
+    captureControls() {
+        if (!this.ctrl.manageCamera || this.savedControls) return;
+        const { camera, controls } = this.ctrl;
+        this.savedControls = {
+            parent: camera.parent,
+            rotationOrder: camera.rotation.order,
+            view: camera.view ? { ...camera.view } : null,
+            controls: {
+                enabled: controls.enabled,
+                enablePan: controls.enablePan,
+                enableRotate: controls.enableRotate,
+                enableZoom: controls.enableZoom,
+                rotateSpeed: controls.rotateSpeed,
+                maxPolarAngle: controls.maxPolarAngle,
+                minDistance: controls.minDistance,
+                mouseButtons: { ...controls.mouseButtons },
+                touches: { ...controls.touches },
+            },
+        };
+        camera.rotation.reorder("YXZ");
+    }
+
+    /** 同步内置视角输入；键盘绑定开关不影响鼠标旋转、平移或滚轮。 */
+    syncInputEvents() {
+        if (this.ctrl.manageCamera && this.savedControls) {
+            const enabled = this.ctrl.isupdate && this.ctrl.bindLookEvents;
+            this.ctrl.controls.enableRotate = enabled && this.savedControls.controls.enableRotate;
+            this.ctrl.controls.enablePan = enabled && this.savedControls.controls.enablePan;
+            if (enabled) { this.connectZoomWheel(); return; }
+        }
+        this.disconnectZoomWheel();
+    }
+
+    releasePointerLock() {
+        if (this.ctrl.manageCamera && document.pointerLockElement === this.ctrl.controls.domElement) {
+            document.exitPointerLock();
+        }
+    }
+
+    /** 根据当前输入开关、视角和鼠标模式判断是否需要指针锁定。 */
+    private needsPointerLock() {
+        const c = this.ctrl;
+        return c.manageCamera && c.isupdate && c.bindLookEvents
+            && (c.isFirstPerson || this.mouseMode === 0 || this.mouseMode === 1 || this.mouseMode === 5);
     }
 
     // 通用弹簧阻尼：把 controls.target 朝 dest 平滑跟随，返回本帧的目标点
@@ -77,6 +137,7 @@ export class CameraSystem {
 
     // 设置越肩视角
     setOverShoulder(enable: boolean) {
+        if (!this.ctrl.manageCamera) return;
         if (!enable || this.ctrl.controllerMode === 1) { this.ctrl.camera.clearViewOffset(); return; }
         const w = window.innerWidth;
         const h = window.innerHeight;
@@ -85,6 +146,7 @@ export class CameraSystem {
 
     // 切换视角模式
     changeView() {
+        if (!this.ctrl.manageCamera) return;
         this.ctrl.onBeforeViewChange?.(this.ctrl.isFirstPerson);
         this.ctrl.isFirstPerson = !this.ctrl.isFirstPerson;
         if (this.ctrl.isFirstPerson) {
@@ -117,6 +179,7 @@ export class CameraSystem {
 
     // 进入第一人称
     setFirstPerson(vertAngle = 0) {
+        if (!this.ctrl.manageCamera) return;
         this.ctrl.controls.enabled = false;
         const s = this.ctrl.playerModelConfig.scale;
         const sharedOffset = this.ctrl.playerModelConfig.firstPersonCameraOffset;
@@ -140,18 +203,25 @@ export class CameraSystem {
 
     // 指针锁定控制
     setPointerLock() {
-        const lockTarget = this.ctrl.controls.domElement;
-        if (!lockTarget?.requestPointerLock) return;
-        if (((this.mouseMode === 0 || this.mouseMode === 1 || this.mouseMode === 5) && !this.ctrl.isFirstPerson) || this.ctrl.isFirstPerson) {
-            lockTarget.requestPointerLock();
+        if (this.needsPointerLock()) {
+            const lockTarget = this.ctrl.controls.domElement;
+            if (!lockTarget?.requestPointerLock) return;
+            lockTarget.requestPointerLock()?.then(() => {
+                // 授权完成时重新检查当前需求，释放模式切换后迟到的锁定。
+                if (!this.needsPointerLock() && document.pointerLockElement === lockTarget) document.exitPointerLock();
+            }).catch(() => { /* 浏览器拒绝锁定时仍允许普通轨道操作。 */ });
         } else {
-            document.exitPointerLock();
+            this.releasePointerLock();
         }
     }
 
     // 初始相机位置
     setCamPos() {
-        requestAnimationFrame(() => {
+        if (!this.ctrl.manageCamera) return;
+        if (this.positionRequest !== null) cancelAnimationFrame(this.positionRequest);
+        this.positionRequest = requestAnimationFrame(() => {
+            this.positionRequest = null;
+            if (!this.ctrl.manageCamera || !this.savedControls) return;
             if (!this.ctrl.isFirstPerson) {
                 const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.ctrl.playerCapsule.quaternion);
                 const angle = Math.atan2(dir.z, dir.x);
@@ -169,19 +239,24 @@ export class CameraSystem {
 
     // 初始化轨道控制
     initControls() {
+        if (!this.ctrl.manageCamera) return;
+        this.captureControls();
         this.ctrl.controls.enableZoom = false;
         this.ctrl.controls.rotateSpeed = this.sensitivity * 0.05;
         this.ctrl.controls.maxPolarAngle = Math.PI;
         this.ctrl.controls.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
         // 防止相机轨道半径归零穿越目标点
         this.ctrl.controls.minDistance = this.minDist;
-        this.connectZoomWheel();
+        if (this.ctrl.mobileControls) {
+            this.ctrl.controls.touches = { ONE: null as any, TWO: null as any };
+        }
+        this.syncInputEvents();
     }
 
     /** 切换第三人称滚轮缩放；关闭时恢复配置的默认最远距离。 */
     setZoomEnabled(enabled: boolean) {
         this.zoomEnabled = enabled;
-        this.ctrl.controls.enableZoom = false;
+        if (this.ctrl.manageCamera) this.ctrl.controls.enableZoom = false;
         this._flySprintMaxDistBoost = false;
         this.maxDist = enabled
             ? Math.max(this.maxDist, this.minDist)
@@ -233,7 +308,7 @@ export class CameraSystem {
 
     /** 滚轮改变目标最远距离。 */
     private onZoomWheel(event: WheelEvent) {
-        if (!this.zoomEnabled || this.ctrl.isFirstPerson || event.deltaY === 0) return;
+        if (!this.ctrl.manageCamera || !this.ctrl.isupdate || !this.ctrl.bindLookEvents || !this.zoomEnabled || this.ctrl.isFirstPerson || event.deltaY === 0) return;
         event.preventDefault();
 
         // 与 OrbitControls 一致地归一化像素、行和页三种 wheel delta。
@@ -249,22 +324,39 @@ export class CameraSystem {
         this.maxDist = Math.max(nextDistance, this.minDist);
     }
 
-    // 重置轨道控制
+    // 交还相机与 Controls，保持当前世界位姿。
     resetControls() {
-        if (!this.ctrl.controls) return;
+        if (this.positionRequest !== null) cancelAnimationFrame(this.positionRequest);
+        this.positionRequest = null;
         this.disconnectZoomWheel();
-        this.ctrl.controls.enabled = true;
-        this.ctrl.controls.enablePan = true;
-        this.ctrl.controls.maxPolarAngle = Math.PI / 2;
-        this.ctrl.controls.rotateSpeed = 1;
-        this.ctrl.controls.enableZoom = true;
-        this.ctrl.controls.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
+        const saved = this.savedControls;
+        if (!saved) return;
+        this.releasePointerLock();
+        const { camera, controls } = this.ctrl;
+        if (this.ctrl.isFirstPerson) {
+            const position = camera.getWorldPosition(new THREE.Vector3());
+            controls.target.copy(position).addScaledVector(camera.getWorldDirection(new THREE.Vector3()), this.maxDist);
+        }
+        if (camera.parent !== saved.parent) {
+            if (saved.parent) saved.parent.attach(camera);
+            else {
+                camera.updateWorldMatrix(true, false);
+                camera.matrixWorld.decompose(camera.position, camera.quaternion, camera.scale);
+                camera.removeFromParent();
+            }
+        }
+        camera.rotation.reorder(saved.rotationOrder);
+        camera.view = saved.view ? { ...saved.view } : null;
+        camera.updateProjectionMatrix();
+        Object.assign(controls, saved.controls);
+        this.savedControls = null;
+        this._springVelocity.set(0, 0, 0);
     }
 
     // 处理鼠标朝向
     setToward(dx: number, dy: number, speed: number) {
         this.ctrl.onTowardChange?.(dx, dy, speed);
-        if (!this.ctrl.enableToward) return;
+        if (!this.ctrl.manageCamera || !this.ctrl.enableToward) return;
         const sens = this.sensitivity;
         if (this.ctrl.controllerMode === 0) {
             // 步行第一人称
@@ -308,8 +400,19 @@ export class CameraSystem {
         this.ctrl.camera.lookAt(target);
     }
 
-    // 载具第三人称：弹簧跟随 + 射线避障 + 速度方向
+    /** 第三人称移动时沿最短角度转到人物身后，保留镜头仰角和距离。 */
+    updatePlayerDirection(delta: number) {
+        const c = this.ctrl;
+        if (!c.manageCamera || c.isFirstPerson || c.controllerMode !== 0 || !this.followPlayerDirection) return;
+        if (!(c.input.fwd || c.input.bkd || c.input.lft || c.input.rgt)) return;
+        c.playerCapsule.getWorldQuaternion(this.playerRotation);
+        this.playerForward.set(0, 0, 1).applyQuaternion(this.playerRotation).setY(0);
+        dampCameraHeading(c.camera.position, c.controls.target, this.playerForward.x, this.playerForward.z, this.playerDirectionFollowSpeed, delta);
+    }
+
+    /** 载具第三人称：按行驶方向平滑转向后更新轨道控制和相机避障。 */
     updateThirdPersonVehicle(delta: number) {
+        if (!this.ctrl.manageCamera || this.ctrl.isFirstPerson || this.ctrl.controllerMode !== 1) return;
         const v = this.ctrl.vehicle.active;
         if (!v) return;
 
@@ -317,27 +420,16 @@ export class CameraSystem {
         this.ctrl.camera.position.sub(this.ctrl.controls.target);
         this.ctrl.controls.target.copy(lookTarget);
         this.ctrl.camera.position.add(lookTarget);
-        this.ctrl.controls.update();
-
-        const vehicleBaseDistance = Math.max(this.minDist, v.size.l * 0.8);
-        const desiredDist = Math.max(this.maxDist, vehicleBaseDistance);
-        this.updateWithRaycast(this.ctrl.controls.target, desiredDist);
-
         if ((this.ctrl.input.fwd || this.ctrl.input.bkd) && v.followVehicleDirection) {
             const vel = v.chassisBody.linvel();
             if (Math.hypot(vel.x, vel.z) > 0.3) {
-                const targetAngle = Math.atan2(-vel.x, -vel.z);
-                const offX = this.ctrl.camera.position.x - this.ctrl.controls.target.x;
-                const offZ = this.ctrl.camera.position.z - this.ctrl.controls.target.z;
-                const radius = Math.hypot(offX, offZ);
-                const curAngle = Math.atan2(offX, offZ);
-                const diff = Math.atan2(Math.sin(targetAngle - curAngle), Math.cos(targetAngle - curAngle));
-                const newAngle = curAngle + diff * this.vehicleTurnLerp;
-                this.ctrl.camera.position.x = this.ctrl.controls.target.x + Math.sin(newAngle) * radius;
-                this.ctrl.camera.position.z = this.ctrl.controls.target.z + Math.cos(newAngle) * radius;
-                this.ctrl.controls.update();
+                dampCameraHeading(this.ctrl.camera.position, this.ctrl.controls.target, vel.x, vel.z, v.vehicleDirectionFollowSpeed, delta);
             }
         }
+        this.ctrl.controls.update();
+        const vehicleBaseDistance = Math.max(this.minDist, v.size.l * 0.8);
+        const desiredDist = Math.max(this.maxDist, vehicleBaseDistance);
+        this.updateWithRaycast(this.ctrl.controls.target, desiredDist);
     }
 
     // 收集相机射线碰撞。开车时跳过当前车辆网格。
@@ -357,6 +449,7 @@ export class CameraSystem {
 
     // 射线防穿墙
     updateWithRaycast(origin: THREE.Vector3, maxDist: number = this.maxDist, minDist = this.minDist) {
+        if (!this.ctrl.manageCamera) return;
         this.playerToCam.subVectors(this.ctrl.camera.position, origin);
         const direction = this.playerToCam.clone().normalize();
         this.raycaster.set(origin, direction);

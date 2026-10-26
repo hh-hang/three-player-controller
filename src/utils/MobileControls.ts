@@ -137,6 +137,8 @@ export class MobileControls {
     setInput: SetInputFn;
     controls: OrbitControls;
     private options: MobileControlsOptions = {};
+    private manageCamera = true;
+    private bindLookEvents = true;
 
     // 摇杆状态
     joystick: VirtualJoystick | null = null;
@@ -162,7 +164,7 @@ export class MobileControls {
     }
 
     // 初始化移动端控制
-    async init(opts: MobileControlsOptions = {}) {
+    init(opts: MobileControlsOptions = {}, manageCamera = true) {
         this.options = opts;
         const showJoystick = opts.joystick ?? true;
         const showJump = opts.jump !== false;
@@ -170,8 +172,10 @@ export class MobileControls {
         const showView = opts.view !== false;
         const showVehicle = opts.vehicle !== false;
 
-        this.controls.maxPolarAngle = Math.PI * (300 / 360);
-        this.controls.touches = { ONE: null as any, TWO: null as any };
+        if (manageCamera) {
+            this.controls.maxPolarAngle = Math.PI * (300 / 360);
+            this.controls.touches = { ONE: null as any, TWO: null as any };
+        }
 
         const JOY_SIZE = 120;
         const container = document.body;
@@ -267,6 +271,32 @@ export class MobileControls {
         }
     }
 
+    /** 应用管理镜头时，让出右侧触摸区域并隐藏内置视角切换按钮。 */
+    setManageCamera(enabled: boolean) {
+        this.manageCamera = enabled;
+        this.syncLookControls();
+        if (this.viewBtnEl) this.viewBtnEl.style.display = enabled ? "flex" : "none";
+    }
+
+    /** 切换内置触摸视角，不影响摇杆、按钮和外部输入。 */
+    setBindLookEvents(enabled: boolean) {
+        this.bindLookEvents = enabled;
+        this.syncLookControls();
+    }
+
+    /** 同步视角区域显隐，关闭时释放当前触摸操作。 */
+    private syncLookControls() {
+        const enabled = this.manageCamera && this.bindLookEvents;
+        if (!enabled) {
+            if (this.lookPointerId !== null && this.lookAreaEl?.hasPointerCapture(this.lookPointerId)) {
+                this.lookAreaEl.releasePointerCapture(this.lookPointerId);
+            }
+            this.isLookDown = false;
+            this.lookPointerId = null;
+        }
+        if (this.lookAreaEl) this.lookAreaEl.style.display = enabled ? "" : "none";
+    }
+
     // 销毁移动端控制
     destroy() {
         try {
@@ -310,7 +340,7 @@ export class MobileControls {
 
     // 触摸按下
     private onPointerDown = (e: PointerEvent) => {
-        if (e.pointerType !== "touch") return;
+        if (e.pointerType !== "touch" || !this.manageCamera || !this.bindLookEvents) return;
         this.isLookDown = true;
         this.lookPointerId = e.pointerId;
         this.lastTouchX = e.clientX;

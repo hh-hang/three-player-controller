@@ -20,6 +20,7 @@
 - 3D Tiles 流式碰撞体构建
 - 内置车辆物理、悬挂、转向、抓地和手刹
 - Foot IK 插件
+- 路线移动插件，支持单点、循环路线及暂停 / 继续
 - 自定义动画与 Locomotion Set
 - 移动端虚拟摇杆与按钮
 - 自定义键位与外部输入
@@ -123,7 +124,7 @@ function animate() {
 animate();                                                                  
 ```
 
-> `player.update()` 内部已经接管传入的相机控制器。渲染循环中不要再次调用 `controls.update()`，否则可能与内部相机逻辑冲突。
+> 默认由 `player.update()` 接管传入的相机控制器，不要重复调用 `controls.update()`。设置 `manageCamera: false` 后，由应用自行更新相机和 Controls。
 
 ### 完整参数示例
 
@@ -199,6 +200,8 @@ await player.init({
     isFirstPerson: false,                               // 初始是否进入第一人称，默认 false
     enableSpringCamera: false,                          // 是否启用弹簧相机，默认 false
     springCameraTime: 0.05,                             // 弹簧相机平滑时间（秒），默认 0.05
+    followPlayerDirection: false,                       // 第三人称移动时镜头跟随人物朝向，默认 false
+    playerDirectionFollowSpeed: 3,                       // 朝向跟随速度，越大越快，0 暂停跟随，默认 3
 
     // 其他（可选）
     mouseSensitivity: 5,                                // 鼠标灵敏度，默认 5
@@ -432,6 +435,7 @@ const vehicle = await player.loadVehicleModel({
     driverSeatRotation: 0,                               // 驾驶位相对底盘局部的水平旋转（弧度），默认 0
     modelRotation: -Math.PI / 2,                         // 车辆模型绕 Y 轴旋转（弧度），默认 -π/2
     followVehicleDirection: true,                        // 驾驶时镜头是否跟随车辆朝向，默认 true
+    vehicleDirectionFollowSpeed: 3,                       // 朝向跟随速度，越大越快，0 暂停跟随，默认 3
 
     // 调试（可选）
     debug: {                                             // 车辆物理调试显示配置
@@ -502,6 +506,8 @@ const vehicle = await player.loadVehicleModel({
 ```ts
 player.resetVehicle();                                  // 翻正当前驾驶车辆，并清零线速度和角速度
 player.setVehicleScale(vehicle, 0.12);                  // 动态修改车辆整体缩放
+player.setFollowVehicleDirection(vehicle, true);        // 开启该车相机的朝向跟随
+player.setVehicleDirectionFollowSpeed(vehicle, 2);      // 调整该车相机的朝向跟随速度
 player.setVehicleClearance(vehicle, 0.15);              // 调整底盘碰撞盒离地间隙
 player.setVehicleChassisSizeScale(vehicle, {            // 调整底盘碰撞盒相对自动 AABB 的尺寸倍率
     x: 1,                                               // X 轴尺寸倍率
@@ -561,6 +567,54 @@ footIK.dispose();                         // 释放 Foot IK 创建的调试对�
 
 完整示例见 [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js)。
 
+# 路线移动插件
+
+`RouteFollower` 通过独立入口按需导入，支持单点移动和按顺序经过指定路线，不包含寻路或绕障。目标点使用世界坐标，Y 表示地面高度；移动继续使用角色原有的速度、碰撞、重力和动画。
+
+```ts
+import { RouteFollower } from "three-player-controller/route";
+
+const route = new RouteFollower();
+player.use(route);
+
+route.follow([
+    [2, 0, 0],
+    [2, 0, 3],
+    [0, 0, 3],
+], {
+    run: false,
+    loop: false,
+    onEnd({ reason }) {
+        console.log(reason); // completed / cancelled / blocked
+    },
+});
+
+route.setRun(true);                    // 当前路线实时切换为跑步，false 切回行走
+route.pause();                         // 保留目标和进度，物理继续更新
+route.resume();                        // 从当前位置继续
+route.cancel();                        // 取消并触发结束通知
+// route.moveTo([2, 0, 0], options);    // 单点移动，可接入应用的点击拾取
+```
+
+| 名称 | 说明 |
+| --- | --- |
+| `state` | `idle` / `moving` / `paused`。 |
+| `currentIndex` | 当前目标的数组下标；空闲时为 `-1`。 |
+| `setRun(enabled)` | 实时切换当前路线的行走 / 跑步；暂停时在恢复后生效，不触发结束通知。 |
+| `run` / `loop` | 跑步 / 循环路线，默认均为 `false`；`moveTo()` 不循环。 |
+| `arrivalRadius` | 水平到达距离，默认胶囊半径的 1/4，必须大于 0。 |
+| `heightTolerance` | 脚底与目标的高度容差，默认胶囊半径的 1/2。 |
+| `blockedTimeout` | 持续无法接近目标的秒数，默认 `2`；`0` 关闭超时。 |
+| `onEnd(event)` | 每条路线结束时调用一次；事件包含 `reason`、`routeId`、`waypointIndex`、`waypointCount`。 |
+
+距离参数均为世界单位。选项可以传给构造函数作为默认值，也可以在 `follow()` / `moveTo()` 中覆盖。角色接地且水平距离、高度差均满足条件时才算到达。
+
+插件不切换相机或键盘开关。人工移动、跳跃、飞行或上下车会取消路线，单纯转动视角不会；关闭键盘绑定后，移动端控件和应用的 `setInput()` 仍可打断。暂停不会触发结束通知，也不累计受阻时间。切换到飞行或载具模式、替换路线、切换模型或卸载插件会取消当前路线。
+
+结束通知在路线状态和移动指令清理后触发，可以在回调中恢复输入或启动下一条路线。连续替换目标时保留移动速度和相同动画的播放进度，旧路线仍会通知 `cancelled`。`loop: true` 时持续循环，直到取消或受阻。`player.unuse(route)` 卸载插件，`route.dispose()` 释放插件；`player.destroy()` 自动清理已注册插件。
+
+Showcase 的 `Character > Route Following` 提供预设路线、点击移动、暂停、继续和取消演示。
+
 # API
 
 ## 生命周期与核心
@@ -617,6 +671,13 @@ footIK.dispose();                         // 释放 Foot IK 创建的调试对�
 | 方法 | 说明 |
 | --- | --- |
 | `setInput(input)` | 注入外部输入。 |
+| `setManageCamera(enabled)` | 启用或禁用相机接管。 |
+| `setBindKeyboardEvents(enabled)` | 启用或禁用内置键盘输入。 |
+| `setBindLookEvents(enabled)` | 启用或禁用内置鼠标、滚轮及触摸视角输入。 |
+| `setFollowPlayerDirection(enabled)` | 启用或禁用人物第三人称移动时的相机朝向跟随。 |
+| `setPlayerDirectionFollowSpeed(speed)` | 设置人物朝向跟随速度。 |
+| `setFollowVehicleDirection(vehicle, enabled)` | 启用或禁用指定车辆第三人称驾驶时的相机朝向跟随。 |
+| `setVehicleDirectionFollowSpeed(vehicle, speed)` | 设置指定车辆的朝向跟随速度。 |
 | `setKeyMap(map?)` | 自定义或恢复默认键位。 |
 | `setMouseSensitivity(v)` | 设置鼠标灵敏度。 |
 | `setPlayerScale(v)` | 动态修改人物缩放。 |
@@ -780,6 +841,9 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `scene` | `THREE.Scene` | 是 | — | three.js 场景实例。 |
 | `camera` | `THREE.PerspectiveCamera` | 是 | — | three.js 相机实例。 |
 | `controls` | `any` | 是 | — | 外部相机控制器，通常为 `OrbitControls`。 |
+| `manageCamera` | `boolean` | 否 | `true` | 接管相机、Controls 和视角切换；关闭后由应用更新相机。 |
+| `bindKeyboardEvents` | `boolean` | 否 | `true` | 绑定键盘输入；不影响鼠标视角、滚轮、移动端控件或 `setInput()`。 |
+| `bindLookEvents` | `boolean` | 否 | `true` | 绑定内置鼠标、滚轮和移动端视角手势；不影响键盘、相机跟随、避障或 `setInput()`。 |
 | `playerModelConfig` | `PlayerModelOptions` | 是 | — | 角色模型与参数配置。 |
 | `initPos` | `THREE.Vector3` | 否 | `(0, 0, 0)` | 初始出生点。 |
 | `colliders` | `ColliderDesc[]` | 否 | — | 初始化时批量注册碰撞体。 |
@@ -795,6 +859,8 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `isFirstPerson` | `boolean` | 否 | `false` | 初始化时是否直接进入第一人称。 |
 | `enableSpringCamera` | `boolean` | 否 | `false` | 是否启用弹簧相机（目标点以弹簧阻尼跟随角色）。 |
 | `springCameraTime` | `number` | 否 | `0.05` | 弹簧平滑时间（秒），越小跟随越紧。 |
+| `followPlayerDirection` | `boolean` | 否 | `false` | 第三人称移动时相机平滑转到人物身后，停步后可自由观察；需要 `manageCamera: true`。 |
+| `playerDirectionFollowSpeed` | `number` | 否 | `3` | 朝向跟随响应速度（1/秒），越大越快；`0` 暂停跟随，不能为负数。 |
 | `camLookAtHeightRatio` | `number` | 否 | `0.8` | 第三人称相机看向点高度比例（0=胶囊底部，1=顶部）。 |
 | `timeScale` | `number` | 否 | `1` | 时间缩放系数，<1 慢动作，>1 快进。 |
 | `enableGroundVolumeProbe` | `boolean` | 否 | `true` | 是否启用向下体积地面探测；中心射线未命中近距离支撑时，用带宽度的圆柱传感区覆盖细缝两侧。 |
@@ -920,6 +986,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `driverSeatRotation` | `number` | `0` | 驾驶位相对车辆底盘局部的水平旋转（弧度）。 |
 | `modelRotation` | `number` | `-Math.PI / 2` | 车辆模型绕 Y 轴的初始旋转。 |
 | `followVehicleDirection` | `boolean` | `true` | 驾驶时镜头是否跟随车辆朝向。 |
+| `vehicleDirectionFollowSpeed` | `number` | `3` | 朝向跟随响应速度（1/秒），越大越快；`0` 暂停跟随，必须为有限非负数。 |
 | `debug` | `VehicleDebugOptions` | — | 车辆物理调试显示配置。 |
 | `chassis` | `VehicleChassisOptions` | — | 底盘碰撞盒与阻尼配置。 |
 | `suspension` | `VehicleSuspensionOptions` | — | 悬挂与轮胎配置。 |

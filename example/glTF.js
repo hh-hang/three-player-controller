@@ -801,7 +801,7 @@ function applyVehicleTuning() {
         v.maxSpeed = t.power.maxSpeed * v.scale;
         v.acceleration = t.power.acceleration * v.scale;
         v.deceleration = t.power.deceleration * v.scale;
-        v.followVehicleDirection = t.followVehicleDirection;
+        player.setFollowVehicleDirection(v, t.followVehicleDirection);
 
         const sus = t.suspension;
         const staticSag = 9.81 * v.scale / (4 * Math.max(1e-4, sus.stiffness));

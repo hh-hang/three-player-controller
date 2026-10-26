@@ -4,6 +4,7 @@ export default defineConfig({
     entry: {
         index: "src/index.ts",
         "foot-ik": "src/foot-ik.ts",
+        route: "src/route.ts",
     },
     format: ["esm", "cjs"],
     dts: true,

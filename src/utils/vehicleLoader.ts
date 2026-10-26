@@ -4,6 +4,7 @@ import { createVehicleController, DEFAULT_MAX_SUSPENSION_TRAVEL, DEFAULT_WHEEL_P
 import { VehicleRigidBody } from "./vehiclePhysics/VehicleRigidBody";
 import { getBbox } from "./bbox";
 import type { VehicleOptions, VehicleInstance } from "../types";
+import { assertDirectionFollowSpeed } from "./cameraHeading";
 
 export type VehicleLoaderContext = {
     loader: GLTFLoader;
@@ -36,6 +37,7 @@ export type VehicleLoaderContext = {
             rollInfluence: number;
         };
         followVehicleDirection: boolean;
+        vehicleDirectionFollowSpeed: number;
     };
     vehicleLength: number;
 };
@@ -69,6 +71,8 @@ export async function loadVehicleModel(
     const acceleration = power.acceleration * scale;
     const deceleration = power.deceleration * scale;
     const followVehicleDirection = opts.followVehicleDirection ?? vehicleParams.followVehicleDirection;
+    const vehicleDirectionFollowSpeed = opts.vehicleDirectionFollowSpeed ?? vehicleParams.vehicleDirectionFollowSpeed;
+    assertDirectionFollowSpeed(vehicleDirectionFollowSpeed);
 
     let model: THREE.Object3D;
     if (opts.model) {
@@ -135,7 +139,7 @@ export async function loadVehicleModel(
     scene.remove(tempGroup);
 
     if (wheelsInfo.length !== 4) {
-        throw new Error(`车辆需要 4 个有效车轮节点,当前找到 ${wheelsInfo.length} 个`);
+        throw new Error(`车辆需要 4 个有效车轮节点，当前找到 ${wheelsInfo.length} 个。`);
     }
 
     // 创建车辆根节点
@@ -315,6 +319,7 @@ export async function loadVehicleModel(
         acceleration,
         deceleration,
         followVehicleDirection,
+        vehicleDirectionFollowSpeed,
         physicsBoxMesh,
         wheelRayDebug,
         wheelTravelDebug,

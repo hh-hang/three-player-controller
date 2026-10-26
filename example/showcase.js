@@ -35,6 +35,7 @@ import Stats from "three/examples/jsm/libs/stats.module.js";
 import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
 import { bindVehicleHintMode } from "./control-hints.js";
+import { createRouteDemo } from "./route-demo.js";
 
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
@@ -53,6 +54,7 @@ const VEHICLE_SPAWNS = [
 // 车辆调参（加载与 GUI 共用）
 const VEHICLE_TUNING = {
     followVehicleDirection: true,
+    vehicleDirectionFollowSpeed: 3,
     debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false, showWheelSpheres: false },
     chassis: {
         density: 1,
@@ -305,6 +307,7 @@ async function init() {
         minCamDistance: 8,
         maxCamDistance: 300,
         camLookAtHeightRatio: 0.5,
+        thirdMouseMode: 3,
         enableOverShoulderView: true,
         camOverShoulderOffsetRatio: 0,
         enableSpringCamera: true,
@@ -913,6 +916,7 @@ async function spawnShowcaseVehicles(gltfLoader) {
             driverSeatRotation: -Math.PI / 2,
             modelRotation: -Math.PI / 2,
             followVehicleDirection: VEHICLE_TUNING.followVehicleDirection,
+            vehicleDirectionFollowSpeed: VEHICLE_TUNING.vehicleDirectionFollowSpeed,
             debug: VEHICLE_TUNING.debug,
             chassis: VEHICLE_TUNING.chassis,
             suspension: VEHICLE_TUNING.suspension,
@@ -1509,7 +1513,8 @@ function applyVehicleTuning() {
         v.maxSpeed = t.power.maxSpeed * v.scale;
         v.acceleration = t.power.acceleration * v.scale;
         v.deceleration = t.power.deceleration * v.scale;
-        v.followVehicleDirection = t.followVehicleDirection;
+        player.setFollowVehicleDirection(v, t.followVehicleDirection);
+        player.setVehicleDirectionFollowSpeed(v, t.vehicleDirectionFollowSpeed);
 
         const sus = t.suspension;
         const staticSag = 9.81 * v.scale / (4 * Math.max(1e-4, sus.stiffness));
@@ -1548,6 +1553,9 @@ function createDebugPanel() {
     const playerScale = player.playerModelConfig.scale;
     const toBasePlayerValue = (value) => value / playerScale;
     const params = {
+        manageCamera: player.manageCamera,
+        bindKeyboardEvents: player.bindKeyboardEvents,
+        bindLookEvents: player.bindLookEvents,
         colliderDebug: false,
         playerCapsuleDebug: false,
         dynamicBodyDebug: false,
@@ -1568,6 +1576,8 @@ function createDebugPanel() {
         camOverShoulderOffsetRatio: player.cam.overShoulderOffsetRatio,
         enableSpringCamera: player.cam.enableSpringCamera,
         springCameraTime: player.cam.springCameraTime,
+        followPlayerDirection: player.cam.followPlayerDirection,
+        playerDirectionFollowSpeed: player.cam.playerDirectionFollowSpeed,
         thirdMouseMode: player.cam.mouseMode,
         enableZoom: player.cam.zoomEnabled,
         footIKEnabled: options.enabled,
@@ -1629,6 +1639,28 @@ function createDebugPanel() {
         player?.setPlayerCapsuleDebug?.(value);
     });
 
+    const ownershipFolder = characterFolder.addFolder("Control Ownership");
+    const manageCameraControl = ownershipFolder.add(params, "manageCamera").name("Manage Camera").onChange((value) => {
+        player?.setManageCamera(value);
+    });
+    manageCameraControl.domElement.title = "Off: use the scene's orbit controls without following the character.";
+    const bindKeyboardControl = ownershipFolder.add(params, "bindKeyboardEvents").name("Bind Keyboard Events").onChange((value) => {
+        player?.setBindKeyboardEvents(value);
+    });
+    bindKeyboardControl.domElement.title = "Off: stop keyboard shortcuts; mouse look, wheel zoom, touch controls, physics and animation continue.";
+    const bindLookControl = ownershipFolder.add(params, "bindLookEvents").name("Bind Look Events").onChange((value) => {
+        player?.setBindLookEvents(value);
+    });
+    bindLookControl.domElement.title = "Off: stop built-in mouse look, dragging, wheel zoom and touch look; camera following and external look input continue.";
+    ownershipFolder.close();
+
+    const routeDemo = createRouteDemo({
+        player, scene, camera, canvas: renderer.domElement,
+        folder: characterFolder.addFolder("Route Following"),
+        onMouseModeChange(value) { params.thirdMouseMode = value; },
+    });
+    window.addEventListener("pagehide", () => routeDemo.dispose(), { once: true });
+
     const movementFolder = characterFolder.addFolder("Movement");
     movementFolder.add(params, "gravity", -6000, 0, 50).name("Gravity").decimals(0).onChange((value) => {
         player?.setGravity(value);
@@ -1660,6 +1692,12 @@ function createDebugPanel() {
     movementFolder.close();
 
     const characterCameraFolder = characterFolder.addFolder("Camera");
+    characterCameraFolder.add(params, "followPlayerDirection").name("Follow Player Heading").onChange(value => {
+        player?.setFollowPlayerDirection(value);
+    });
+    characterCameraFolder.add(params, "playerDirectionFollowSpeed", 0, 20, 0.1).name("Heading Follow Speed").onChange(value => {
+        player?.setPlayerDirectionFollowSpeed(value);
+    });
     characterCameraFolder.add(params, "mouseSensitivity", 1, 20, 0.1).name("Mouse Sensitivity").decimals(1).onChange((value) => {
         player?.setMouseSensitivity(value);
     });
@@ -1684,7 +1722,7 @@ function createDebugPanel() {
     characterCameraFolder.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").decimals(2).onChange((value) => {
         if (player) player.cam.springCameraTime = value;
     });
-    characterCameraFolder.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).name("Mouse Mode").onChange((value) => {
+    characterCameraFolder.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).name("Mouse Mode").listen().onChange((value) => {
         player?.setThirdMouseMode(Number(value));
     });
     characterCameraFolder.add(params, "enableZoom").name("Enable Zoom").onChange((value) => {
@@ -1778,6 +1816,7 @@ function createDebugPanel() {
 
     const vehicleCameraFolder = vehicleFolder.addFolder("Camera");
     vehicleCameraFolder.add(t, "followVehicleDirection").name("Follow Vehicle Heading").onChange(applyVehicleTuning);
+    vehicleCameraFolder.add(t, "vehicleDirectionFollowSpeed", 0, 20, 0.1).name("Heading Follow Speed").onChange(applyVehicleTuning);
     vehicleCameraFolder.close();
 
     const vehicleDebugFolder = vehicleFolder.addFolder("Debug");
@@ -1826,6 +1865,8 @@ function animate(timestamp) {
     animTimer.update(timestamp);
     const rawDelta = Math.min(animTimer.getDelta(), 1 / 40);
     if (player) {
+        // 关闭相机接管时，由示例自身更新原有轨道控制器。
+        if (!player.manageCamera) controls.update();
         scaledAnimTime += rawDelta * player.timeScale;
         updateGlowPortal(scaledAnimTime);
         updateKinematicPlatforms(scaledAnimTime);

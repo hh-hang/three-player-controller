@@ -32,7 +32,7 @@ export class BvhWorkerPool {
     /** 将几何加入队列，返回构建完成的 MeshBVH。 */
     generate(geometry: BufferGeometry): Promise<MeshBVH> {
         if (this.disposed) {
-            return Promise.reject(new Error("BvhWorkerPool has been disposed."));
+            return Promise.reject(new Error("BVH 工作池已销毁。"));
         }
         return new Promise((resolve, reject) => {
             this.queue.push({ geometry, resolve, reject });
@@ -155,7 +155,7 @@ export class BvhWorkerPool {
                 try {
                     const worker = await this.ensureWorker();
                     if (this.disposed) {
-                        item.reject(new Error("BvhWorkerPool has been disposed."));
+                        item.reject(new Error("BVH 工作池已销毁。"));
                         continue;
                     }
                     // Worker 不可用：本任务同步构建，剩余任务下一帧再跑

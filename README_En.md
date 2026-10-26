@@ -20,6 +20,7 @@ A lightweight first-person / third-person player controller for three.js. It pro
 - Streaming collider construction for 3D Tiles
 - Built-in vehicle physics, suspension, steering, grip, and handbrake
 - Foot IK plugin
+- Route following plugin with single destinations, looping, pause and resume
 - Custom animations and Locomotion Sets
 - Mobile virtual joystick and buttons
 - Custom key bindings and external input
@@ -123,7 +124,7 @@ function animate() {
 animate();                                                                  
 ```
 
-> `player.update()` already drives the camera controller passed to the player. Do not call `controls.update()` again in the render loop, or it may conflict with the internal camera logic.
+> By default, `player.update()` drives the supplied camera controller; do not also call `controls.update()`. With `manageCamera: false`, the application updates the camera and Controls itself.
 
 ### Complete Parameter Example
 
@@ -199,6 +200,8 @@ await player.init({
     isFirstPerson: false,                               // whether to start in first-person; default false
     enableSpringCamera: false,                          // whether spring camera is enabled; default false
     springCameraTime: 0.05,                             // spring-camera smoothing time in seconds; default 0.05
+    followPlayerDirection: false,                       // follow player heading while moving in third person; default false
+    playerDirectionFollowSpeed: 3,                       // heading follow speed; larger is faster, 0 pauses following; default 3
 
     // Other settings (optional)
     mouseSensitivity: 5,                                // mouse sensitivity; default 5
@@ -432,6 +435,7 @@ const vehicle = await player.loadVehicleModel({
     driverSeatRotation: 0,                               // driver-seat horizontal rotation relative to chassis local space in radians; default 0
     modelRotation: -Math.PI / 2,                         // vehicle model Y-axis rotation in radians; default -π/2
     followVehicleDirection: true,                        // whether the camera follows vehicle heading while driving; default true
+    vehicleDirectionFollowSpeed: 3,                       // heading follow speed; larger is faster, 0 pauses following; default 3
 
     // Debug (optional)
     debug: {                                             // vehicle physics debug visualization settings
@@ -502,6 +506,8 @@ Runtime:
 ```ts
 player.resetVehicle();                                  // right the currently driven vehicle and clear linear / angular velocity
 player.setVehicleScale(vehicle, 0.12);                  // change the overall vehicle scale at runtime
+player.setFollowVehicleDirection(vehicle, true);        // enable camera heading follow for this vehicle
+player.setVehicleDirectionFollowSpeed(vehicle, 2);      // adjust this vehicle's camera heading follow speed
 player.setVehicleClearance(vehicle, 0.15);              // adjust chassis collision-box ground clearance
 player.setVehicleChassisSizeScale(vehicle, {            // adjust chassis collision-box size multipliers relative to the automatic AABB
     x: 1,                                               // X-axis size multiplier
@@ -561,6 +567,54 @@ footIK.dispose();                         // dispose debug objects and related r
 
 See the full example in [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js).
 
+# Route Following Plugin
+
+Import `RouteFollower` from its optional entry point for single destinations or ordered waypoints. It uses the player's existing speed, collision, gravity and animation systems. Points are world coordinates with Y at ground level. Pathfinding and obstacle avoidance are not included.
+
+```ts
+import { RouteFollower } from "three-player-controller/route";
+
+const route = new RouteFollower();
+player.use(route);
+
+route.follow([
+    [2, 0, 0],
+    [2, 0, 3],
+    [0, 0, 3],
+], {
+    run: false,
+    loop: false,
+    onEnd({ reason }) {
+        console.log(reason); // completed / cancelled / blocked
+    },
+});
+
+route.setRun(true);                    // Switch the current route to running, or false to walk.
+route.pause();                         // Keep the target and progress; physics continues.
+route.resume();                        // Continue from the current position.
+route.cancel();                        // Cancel and notify completion.
+// route.moveTo([2, 0, 0], options);    // Single point, supplied by application picking.
+```
+
+| Name | Description |
+| --- | --- |
+| `state` | `idle` / `moving` / `paused`. |
+| `currentIndex` | Current waypoint index, or `-1` while idle. |
+| `setRun(enabled)` | Switch the current route between walking and running; paused routes apply the change on resume without emitting an end event. |
+| `run` / `loop` | Run / repeat the route; both default to `false`. `moveTo()` never loops. |
+| `arrivalRadius` | Horizontal arrival distance; defaults to 1/4 of the capsule radius, must be positive. |
+| `heightTolerance` | Allowed foot-to-target height difference; defaults to 1/2 of the capsule radius. |
+| `blockedTimeout` | Seconds without progress before ending; defaults to `2`, or `0` to disable. |
+| `onEnd(event)` | Called once per route with `reason`, `routeId`, `waypointIndex` and `waypointCount`. |
+
+Distances use world units. Constructor options provide defaults; `follow()` / `moveTo()` options override them. Arrival requires ground contact and both horizontal and height tolerances to be satisfied.
+
+The plugin leaves camera and keyboard settings to the application. Movement, jump, flight or vehicle input cancels a route; looking around does not. Touch controls and application calls to `setInput()` can still interrupt when keyboard binding is disabled. Pausing does not emit an end event or count toward the blocked timeout. Switching to flight or vehicle mode, replacing the route, changing the model or detaching the plugin cancels the active route.
+
+State and movement commands are cleared before `onEnd`, so callbacks can restore input or start another route. Replacing an active route preserves velocity and playback progress for the same animation; the old route still reports `cancelled`. Looping routes run until cancelled or blocked. Use `player.unuse(route)` to detach and `route.dispose()` to dispose; `player.destroy()` cleans up registered plugins.
+
+Showcase includes a preset route, click to move, pause, resume and cancel under `Character > Route Following`.
+
 # API
 
 ## Lifecycle And Core
@@ -617,6 +671,13 @@ See the full example in [`example/footIK.js`](https://github.com/hh-hang/three-p
 | Method | Description |
 | --- | --- |
 | `setInput(input)` | Inject external input. |
+| `setManageCamera(enabled)` | Enable or disable camera management. |
+| `setBindKeyboardEvents(enabled)` | Enable or disable built-in keyboard input. |
+| `setBindLookEvents(enabled)` | Enable or disable built-in mouse, wheel and touch view input. |
+| `setFollowPlayerDirection(enabled)` | Enable or disable camera heading follow during third-person movement. |
+| `setPlayerDirectionFollowSpeed(speed)` | Set player heading follow speed. |
+| `setFollowVehicleDirection(vehicle, enabled)` | Enable or disable camera heading follow for a specific vehicle during third-person driving. |
+| `setVehicleDirectionFollowSpeed(vehicle, speed)` | Set heading follow speed for a specific vehicle. |
 | `setKeyMap(map?)` | Customize or restore default key bindings. |
 | `setMouseSensitivity(v)` | Set mouse sensitivity. |
 | `setPlayerScale(v)` | Change player scale at runtime. |
@@ -780,6 +841,9 @@ player.onTowardChange = (dx, dy, speed) => {};     // triggered when facing / vi
 | `scene` | `THREE.Scene` | Yes | — | three.js scene instance. |
 | `camera` | `THREE.PerspectiveCamera` | Yes | — | three.js camera instance. |
 | `controls` | `any` | Yes | — | External camera controller, usually `OrbitControls`. |
+| `manageCamera` | `boolean` | No | `true` | Manage the camera, Controls, and view switching; otherwise the application updates the camera. |
+| `bindKeyboardEvents` | `boolean` | No | `true` | Bind keyboard input; mouse look, wheel zoom, touch controls and `setInput()` are unaffected. |
+| `bindLookEvents` | `boolean` | No | `true` | Bind built-in mouse, wheel and touch look; keyboard input, camera following, obstacle avoidance and `setInput()` are unaffected. |
 | `playerModelConfig` | `PlayerModelOptions` | Yes | — | Player model and parameter configuration. |
 | `initPos` | `THREE.Vector3` | No | `(0, 0, 0)` | Initial spawn point. |
 | `colliders` | `ColliderDesc[]` | No | — | Colliders registered in bulk during initialization. |
@@ -795,6 +859,8 @@ player.onTowardChange = (dx, dy, speed) => {};     // triggered when facing / vi
 | `isFirstPerson` | `boolean` | No | `false` | Whether to enter first-person immediately during initialization. |
 | `enableSpringCamera` | `boolean` | No | `false` | Whether spring camera is enabled (the target follows the player with spring damping). |
 | `springCameraTime` | `number` | No | `0.05` | Spring smoothing time in seconds; smaller values follow more tightly. |
+| `followPlayerDirection` | `boolean` | No | `false` | Smoothly turn behind the player while moving in third person; allow free observation when stopped. Requires `manageCamera: true`. |
+| `playerDirectionFollowSpeed` | `number` | No | `3` | Heading follow response rate in 1/seconds; larger is faster, `0` pauses following. Must be non-negative. |
 | `camLookAtHeightRatio` | `number` | No | `0.8` | Third-person camera target height ratio (0=capsule bottom, 1=top). |
 | `timeScale` | `number` | No | `1` | Time scale; <1 slow motion, >1 fast-forward. |
 | `enableGroundVolumeProbe` | `boolean` | No | `true` | Whether downward ground volume probe is enabled; when the center ray misses nearby support, a cylindrical sensor covers gaps on either side. |
@@ -920,6 +986,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // triggered when facing / vi
 | `driverSeatRotation` | `number` | `0` | Driver-seat horizontal rotation relative to vehicle chassis local space in radians. |
 | `modelRotation` | `number` | `-Math.PI / 2` | Initial vehicle model Y-axis rotation. |
 | `followVehicleDirection` | `boolean` | `true` | Whether the camera follows vehicle heading while driving. |
+| `vehicleDirectionFollowSpeed` | `number` | `3` | Heading follow response rate in 1/seconds; larger is faster, `0` pauses following. Must be finite and non-negative. |
 | `debug` | `VehicleDebugOptions` | — | Vehicle physics debug visualization settings. |
 | `chassis` | `VehicleChassisOptions` | — | Chassis collision-box and damping settings. |
 | `suspension` | `VehicleSuspensionOptions` | — | Suspension and tire settings. |

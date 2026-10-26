@@ -52,12 +52,21 @@ export class CharacterMovement {
             c.runAnimationPass(delta);
             return;
         }
+        // 先携带到平台当前位姿，再探测地面和推出。
+        if (c.activeKinematicCollider && c.playerIsOnGround && !c.isFlying) {
+            c.playerCapsule.position.add(c.activeKinematicCollider.deltaPos);
+            if (c.activeKinematicCollider.deltaRotY !== 0) {
+                c.playerCapsule.rotateY(c.activeKinematicCollider.deltaRotY);
+            }
+        }
         // —— 输入与目标速度 ——
         c.camera.getWorldDirection(c.camDir);
         const angle = 2 * Math.PI - (Math.atan2(c.camDir.z, c.camDir.x) + Math.PI / 2);
 
         const moveAxes = c.input.getMoveAxes();
+        const automaticMove = c.input.getAutomaticMove();
         c.moveDir.copy(c.DIR_RGT).multiplyScalar(moveAxes.x).addScaledVector(c.DIR_FWD, moveAxes.y);
+        if (automaticMove && !c.isFlying) c.moveDir.copy(automaticMove.direction);
         if (c.isFlying) {
             if (c.input.fwd || moveAxes.isAnalog) c.moveDir.copy(c.camDir);
             if (c.input.space) c.moveDir.y += 1;
@@ -67,8 +76,9 @@ export class CharacterMovement {
         }
 
         c.moveDir.normalize();
+        if (automaticMove && !c.isFlying) c.curPlayerSpeed *= automaticMove.speedScale;
         // 步行：相对相机水平朝向；飞行且镜头前进时已用 camDir，不再绕 Y 转
-        if (!c.isFlying || (!moveAxes.isAnalog && !c.input.fwd)) {
+        if (!automaticMove && (!c.isFlying || (!moveAxes.isAnalog && !c.input.fwd))) {
             c.moveDir.applyAxisAngle(c.upVector, angle);
         }
 
@@ -266,7 +276,10 @@ export class CharacterMovement {
         // —— 水平（飞行则含竖直）分步移动 + 胶囊推出 ——
         const capsuleInfo = c.playerCapsule.capsuleInfo;
         const xzSpeed = Math.hypot(c.playerVelocity.x, c.playerVelocity.z);
-        const totalDist = c.isFlying ? c.playerVelocity.length() * delta : xzSpeed * delta;
+        const requestedDist = c.isFlying ? c.playerVelocity.length() * delta : xzSpeed * delta;
+        const totalDist = automaticMove && !c.isFlying
+            ? Math.min(requestedDist, automaticMove.maxDistance)
+            : requestedDist;
         c.xzDir.set(c.playerVelocity.x, c.isFlying ? c.playerVelocity.y : 0, c.playerVelocity.z).normalize();
         const maxStep = capsuleInfo.radius * 0.8;
         const steps = Math.min(Math.max(1, Math.ceil(totalDist / maxStep)), c.maxMoveSteps);
@@ -301,14 +314,6 @@ export class CharacterMovement {
             }
         }
 
-        // 站在运动学平台上时跟随平台位移 / 偏航
-        if (c.activeKinematicCollider && c.playerIsOnGround && !c.isFlying) {
-            c.playerCapsule.position.add(c.activeKinematicCollider.deltaPos);
-            if (c.activeKinematicCollider.deltaRotY !== 0) {
-                c.playerCapsule.rotateY(c.activeKinematicCollider.deltaRotY);
-            }
-        }
-
         // 在 IK 执行前缓存本帧最终接地结果。
         this.updateGroundSupport(groundPoint, bestHit, dynamicHit, usedShapeGround);
 
@@ -317,12 +322,15 @@ export class CharacterMovement {
         this.debug.refreshTransforms();
 
         // —— 角色朝向（第三人称 / 飞行） ——
-        if (!c.isFirstPerson) {
+        if (automaticMove || !c.isFirstPerson) {
             const camDirFlat = c.camDir.clone().setY(0).normalize().negate();
             const moveDirFlat = c.moveDir.clone().normalize().negate();
 
             if (!c.isFlying) {
-                if (c.cam.mouseMode === 4 || c.cam.mouseMode === 5) {
+                if (automaticMove && moveDirFlat.lengthSq() > 0) {
+                    c.targetMat.lookAt(c.playerCapsule.position, c.playerCapsule.position.clone().add(moveDirFlat), c.playerCapsule.up);
+                    c.playerCapsule.quaternion.slerp(c.targetQuat.setFromRotationMatrix(c.targetMat), Math.min(1, c.rotationSpeed * delta));
+                } else if (c.cam.mouseMode === 4 || c.cam.mouseMode === 5) {
                     c.targetMat.lookAt(c.playerCapsule.position, c.playerCapsule.position.clone().add(camDirFlat), c.playerCapsule.up);
                     c.playerCapsule.quaternion.copy(c.targetQuat.setFromRotationMatrix(c.targetMat));
                 } else if (c.cam.mouseMode === 0 || c.cam.mouseMode === 2) {
@@ -341,11 +349,12 @@ export class CharacterMovement {
         }
 
         // —— 第三人称相机跟随 ——
-        if (!c.isFirstPerson) {
+        if (c.manageCamera && !c.isFirstPerson) {
             const lookTarget = c.cam.springTarget(c.cam.getLookAtPoint(), delta);
             c.camera.position.sub(c.controls.target);
             c.camera.position.add(lookTarget);
             c.controls.target.copy(lookTarget);
+            c.cam.updatePlayerDirection(delta);
             c.controls.update();
             c.cam.applyFlySprintMaxDist();
             c.cam.updateWithRaycast(c.controls.target);
@@ -438,7 +447,7 @@ export class CharacterMovement {
         c.playerCapsule.updateMatrixWorld();
 
         this.dynamicSupportDelta.subVectors(c.playerCapsule.position, this.dynamicSupportBefore);
-        if (!c.isFirstPerson && this.dynamicSupportDelta.lengthSq() > 0) {
+        if (c.manageCamera && !c.isFirstPerson && this.dynamicSupportDelta.lengthSq() > 0) {
             c.camera.position.add(this.dynamicSupportDelta);
             c.controls.target.add(this.dynamicSupportDelta);
         }

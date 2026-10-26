@@ -56,16 +56,16 @@ export class ColliderRegistry {
     /** 按 desc 创建碰撞体；校验 motion/shape 约束后分派到 mesh/box/sphere。 */
     add(desc: ColliderDesc): ColliderHandle {
         if (desc.motion === "static" && (desc as { follow?: unknown }).follow != null) {
-            throw new Error("static collider 不能带 follow");
+            throw new Error("静态碰撞体不能设置 follow。");
         }
         if (desc.motion === "dynamic" && (desc as { follow?: unknown }).follow != null) {
-            throw new Error("dynamic collider 不能带 follow");
+            throw new Error("动态碰撞体不能设置 follow。");
         }
         if (desc.shape.kind === "mesh") {
             const hasSource = "source" in desc.shape && desc.shape.source != null;
             const hasMesh = "mesh" in desc.shape && desc.shape.mesh != null;
             if (hasSource === hasMesh) {
-                throw new Error('mesh shape 必须提供 source 或 mesh 之一');
+                throw new Error("网格形状必须且只能提供 source 或 mesh 中的一项。");
             }
             if (desc.motion === "dynamic" && !warnedDynamicMesh) {
                 warnedDynamicMesh = true;
@@ -83,7 +83,7 @@ export class ColliderRegistry {
             case "sphere":
                 return this.addSphere(desc);
             default:
-                throw new Error("未知 shape.kind");
+                throw new Error("无法识别 shape.kind 指定的形状类型。");
         }
     }
 
@@ -246,7 +246,7 @@ export class ColliderRegistry {
             const mesh = "mesh" in shape && shape.mesh
                 ? shape.mesh
                 : (() => {
-                    throw new Error("dynamic + mesh 请传入已有 mesh，或改用 box/sphere");
+                    throw new Error("动态碰撞体使用网格形状时必须传入已有 mesh，或改用 box / sphere 形状。");
                 })();
             const entry = this.ctrl.collisionWorld.add({
                 motion: "dynamic",
@@ -364,7 +364,7 @@ export class ColliderRegistry {
 
         const sourceObj = shape.source;
         const root = Array.isArray(sourceObj) ? sourceObj[0] : sourceObj;
-        if (!root) throw new Error("kinematic mesh 需要 source");
+        if (!root) throw new Error("运动学网格必须提供 source。");
 
         // 同一 follow/source 已注册则复用，避免重复合并
         const existing = this.kinematicColliders.find(e => e.source === (follow ?? root));

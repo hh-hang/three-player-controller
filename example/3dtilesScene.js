@@ -58,7 +58,7 @@ const TURBO_SPEED_SCALE = 3;
 
 const container = document.querySelector("#container");
 if (!(container instanceof HTMLElement)) {
-    throw new Error("Missing #container");
+    throw new Error("未找到 #container 容器。");
 }
 
 const attributionsElement = document.querySelector("#google-attributions");

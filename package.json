@@ -20,12 +20,18 @@
             "types": "./dist/foot-ik.d.ts",
             "import": "./dist/foot-ik.mjs",
             "require": "./dist/foot-ik.js"
+        },
+        "./route": {
+            "types": "./dist/route.d.ts",
+            "import": "./dist/route.mjs",
+            "require": "./dist/route.js"
         }
     },
     "scripts": {
         "dev": "vite",
         "dev:tiles": "vite --mode tiles",
         "build": "tsup",
+        "test": "npm run build && node --test tests/*.test.mjs",
         "clean": "rimraf dist",
         "prepare": "npm run build",
         "build:example": "vite build && vite build --mode tiles"

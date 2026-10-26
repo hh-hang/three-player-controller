@@ -4,7 +4,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import { MobileControls } from "./utils/MobileControls";
-import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, KinematicColliderEntry, KeyMap } from "./types";
+import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, KinematicColliderEntry, KeyMap, PlayerInput } from "./types";
 import type { PlayerPlugin } from "./plugins/types";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { CameraSystem } from "./systems/CameraSystem";
@@ -22,6 +22,7 @@ import { CollisionWorld } from "./collision/CollisionWorld";
 import { CHARACTER_QUERY_MASK } from "./collision/groups";
 import { CharacterMovement } from "./systems/CharacterMovement";
 import { PlayerDebug } from "./systems/PlayerDebug";
+import { assertDirectionFollowSpeed } from "./utils/cameraHeading";
 
 /** 未传入delta时计算帧间隔。 */
 let _lastUpdateTime = performance.now();
@@ -48,6 +49,17 @@ export class playerController {
     camera!: THREE.PerspectiveCamera;
     /** 轨道控制器。 */
     controls!: OrbitControls;
+    private _manageCamera = true;
+    private _bindKeyboardEvents = true;
+    private _bindLookEvents = true;
+    private destroyed = false;
+    /** 是否由控制器管理相机；运行时通过 setManageCamera 切换。 */
+    get manageCamera() { return this._manageCamera; }
+    /** 是否绑定键盘输入；运行时通过 setBindKeyboardEvents 切换。 */
+    get bindKeyboardEvents() { return this._bindKeyboardEvents; }
+    /** 是否绑定内置视角输入；运行时通过 setBindLookEvents 切换。 */
+    get bindLookEvents() { return this._bindLookEvents; }
+    private mobileControlsOptions: PlayerControllerOptions["mobileControls"];
 
     // ==================== 玩家配置 ====================
     /** 模型配置项。 */
@@ -90,7 +102,7 @@ export class playerController {
     isupdate = true;
     /** 时间缩放系数。 */
     timeScale = 1;
-    /** 本帧实际使用的 delta（已钳制 + timeScale）。 */
+    /** 当前物理子步实际使用的 delta（已应用 timeScale）。 */
     currentDelta = 0;
     /** 飞行状态。 */
     isFlying = false;
@@ -241,8 +253,11 @@ export class playerController {
 
         this.scene = opts.scene;
         this.camera = opts.camera;
-        this.camera.rotation.order = "YXZ";
         this.controls = opts.controls;
+        this._manageCamera = opts.manageCamera ?? true;
+        this._bindKeyboardEvents = opts.bindKeyboardEvents ?? true;
+        this._bindLookEvents = opts.bindLookEvents ?? true;
+        this.mobileControlsOptions = opts.mobileControls;
 
         this.playerModelConfig = m;
         this.initPos = opts.initPos ? opts.initPos.clone() : this.initPos;
@@ -265,6 +280,8 @@ export class playerController {
         this.cam.mouseMode = opts.thirdMouseMode ?? this.cam.mouseMode;
         this.cam.enableSpringCamera = opts.enableSpringCamera ?? this.cam.enableSpringCamera;
         this.cam.springCameraTime = opts.springCameraTime ?? this.cam.springCameraTime;
+        this.cam.followPlayerDirection = opts.followPlayerDirection ?? this.cam.followPlayerDirection;
+        this.setPlayerDirectionFollowSpeed(opts.playerDirectionFollowSpeed ?? this.cam.playerDirectionFollowSpeed);
         this.cam.zoomEnabled = opts.enableZoom ?? this.cam.zoomEnabled;
         this.cam.minDist = (opts.minCamDistance ?? this.cam.minDist) * s;
         this.cam.maxDist = (opts.maxCamDistance ?? this.cam.maxDist) * s;
@@ -282,22 +299,38 @@ export class playerController {
         // 自定义键位
         if (opts.keyMap) this.input.buildKeyMap(opts.keyMap);
 
-        // 初始化移动端控件
-        if (this.isShowMobileControls) {
-            this.mobileControls = new MobileControls(i => this.input.setInput(i), this.controls);
-            await this.mobileControls.init(opts.mobileControls);
-        }
+        // 在移动端控件修改 Controls 前保存应用配置。
+        if (this.manageCamera) this.cam.captureControls();
+        this.syncMobileControls();
 
         if (opts.colliders?.length) {
             for (const desc of opts.colliders) this.addCollider(desc);
         }
         await this.loadPlayerModel();
 
+        if (this.manageCamera) {
+            this.cam.initControls();
+            this.cam.setCamPos();
+            this.cam.setOverShoulder(this.isFirstPerson ? false : this.enableOverShoulderView);
+        }
         this.input.bindEvents();
-        this.cam.setCamPos();
-        this.cam.initControls();
-        this.cam.setOverShoulder(this.isFirstPerson ? false : this.enableOverShoulderView);
         callback?.();
+    }
+
+    /** 同步内置移动端输入；不影响外部 setInput。 */
+    private syncMobileControls() {
+        if (!this.isupdate || !this.isShowMobileControls) {
+            this.mobileControls?.destroy();
+            this.mobileControls = null;
+            return;
+        }
+        if (this.mobileControls) return;
+        this.mobileControls = new MobileControls(i => this.input.setInput(i), this.controls);
+        this.mobileControls.init(this.mobileControlsOptions, this.manageCamera);
+        this.mobileControls.setManageCamera(this.manageCamera);
+        this.mobileControls.setBindLookEvents(this.bindLookEvents);
+        this.mobileControls.syncControllerModeBtn(this.controllerMode);
+        this.mobileControls.syncVehicleBtn(this.isNearVehicle);
     }
 
     /** 初始化加载器。 */
@@ -497,7 +530,7 @@ export class playerController {
         // 保存当前状态
         const savedPos = this.playerCapsule.position.clone();
         const savedQuat = this.playerCapsule.quaternion.clone();
-        const wasFirstPerson = this.isFirstPerson;
+        const wasFirstPerson = this.manageCamera && this.isFirstPerson;
 
         if (wasFirstPerson) this.scene.attach(this.camera);
         if (this.playerCapsule) this.scene.remove(this.playerCapsule);
@@ -535,15 +568,21 @@ export class playerController {
 
     // ==================== 插件 ====================
 
-    /** 注册后处理插件。 */
+    /** 注册插件。 */
     use(plugin: PlayerPlugin): this {
+        if (this.destroyed) throw new Error("玩家控制器已销毁。");
         if (this.plugins.includes(plugin)) return this;
-        if (plugin.name) {
-            const existing = this.plugins.find(p => p.name === plugin.name);
-            if (existing) this.unuse(existing);
-        }
+        const existing = plugin.name ? this.plugins.find(p => p.name === plugin.name) : undefined;
         this.plugins.push(plugin);
-        plugin.onAttach?.(this);
+        try {
+            plugin.onAttach?.(this);
+        } catch (error) {
+            // 挂载失败只撤销登记，不解绑可能仍属于其他玩家的插件。
+            const index = this.plugins.indexOf(plugin);
+            if (index >= 0) this.plugins.splice(index, 1);
+            throw error;
+        }
+        if (existing && this.plugins.includes(plugin)) this.unuse(existing);
         return this;
     }
 
@@ -642,8 +681,24 @@ export class playerController {
             _lastUpdateTime = now;
         }
         if (!this.isupdate || !this.playerCapsule) return;
-        delta = Math.min(delta, 1 / 40) * this.timeScale;
+        if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(this.timeScale) || this.timeScale <= 0) {
+            this.currentDelta = 0;
+            return;
+        }
+        // 正常低帧率不丢时间；长帧最多追赶 100ms。
+        const elapsed = Math.min(delta * this.timeScale, 0.1);
+        const steps = Math.ceil(elapsed / (1 / 40));
+        for (let i = 0; i < steps; i++) {
+            if (!this.isupdate || !this.playerCapsule) break;
+            this.stepSimulation(elapsed / steps);
+        }
+    }
+
+    /** 用有界时间步推进物理、动画及平台支撑。 */
+    private stepSimulation(delta: number) {
         this.currentDelta = delta;
+        for (const plugin of this.plugins.slice()) plugin.onBeforeUpdate?.(delta);
+        if (!this.isupdate || !this.playerCapsule) return;
         this.updateKinematicColliders();
         if (this.controllerMode === 1) {
             this.vehicle.preparePhysics(delta);
@@ -658,6 +713,12 @@ export class playerController {
         this.dynamics.step(delta);
         this.character.applyDynamicSupportCarry();
         this.commitKinematicPrevMatrices();
+        for (const plugin of this.plugins.slice()) plugin.onAfterUpdate?.(delta);
+    }
+
+    /** @internal 向插件派发人工输入，自动移动使用独立通道。 */
+    notifyInput(input: Readonly<PlayerInput>) {
+        for (const plugin of this.plugins.slice()) plugin.onInput?.(input);
     }
 
     /** 玩家帧更新。 */
@@ -732,7 +793,7 @@ export class playerController {
         this.cam.minDist *= ratio;
         this.cam.maxDist *= ratio;
         this.cam.originMaxDist *= ratio;
-        this.controls.minDistance = this.cam.minDist;
+        if (this.manageCamera) this.controls.minDistance = this.cam.minDist;
     }
 
     /** 重算站立 / 落地阈值（snapH / maxH）。仅在胶囊创建、缩放后调用。 */
@@ -754,7 +815,7 @@ export class playerController {
         // 更新比例相关参数
         this.applyGameplayScaleRatio(ratio);
 
-        if (this.isFirstPerson) this.scene.attach(this.camera);
+        if (this.manageCamera && this.isFirstPerson) this.scene.attach(this.camera);
         this.playerCapsule?.scale.multiplyScalar(ratio);
         if (this.playerCapsule?.capsuleInfo) {
             this.playerCapsule.capsuleInfo.radius *= ratio;
@@ -766,6 +827,17 @@ export class playerController {
     /** 动态修改单辆车的缩放（绝对 scale，与加载时 opts.scale 同一语义）。 */
     setVehicleScale(vehicle: VehicleInstance, newScale: number) {
         this.vehicle.setScale(vehicle, newScale);
+    }
+
+    /** 设置单辆车的朝向跟随响应速度；越大越快，0 暂停跟随。 */
+    setVehicleDirectionFollowSpeed(vehicle: VehicleInstance, speed: number) {
+        assertDirectionFollowSpeed(speed);
+        vehicle.vehicleDirectionFollowSpeed = speed;
+    }
+
+    /** 切换指定车辆驾驶时的相机朝向跟随。 */
+    setFollowVehicleDirection(vehicle: VehicleInstance, enabled: boolean) {
+        vehicle.followVehicleDirection = enabled;
     }
 
     /** 动态修改单辆车的底盘离地间隙（scale=1 基准值）。 */
@@ -892,7 +964,7 @@ export class playerController {
     /** 设置鼠标灵敏度。 */
     setMouseSensitivity(value: number) {
         this.cam.sensitivity = value;
-        this.controls.rotateSpeed = value * 0.05;
+        if (this.manageCamera) this.controls.rotateSpeed = value * 0.05;
     }
 
     // --- 玩家参数 ---
@@ -917,7 +989,7 @@ export class playerController {
         this.cam.minDist = dist * this.playerModelConfig.scale;
         this.cam.originMaxDist = Math.max(this.cam.originMaxDist, this.cam.minDist);
         this.cam.maxDist = Math.max(this.cam.maxDist, this.cam.minDist);
-        this.controls.minDistance = this.cam.minDist;
+        if (this.manageCamera) this.controls.minDistance = this.cam.minDist;
     }
     /** 设置相机最远距。 */
     setMaxCamDistance(dist: number) {
@@ -972,6 +1044,32 @@ export class playerController {
     getCurrentLocomotionSet() { return this.animation.currentLocomotionSet; }
 
     // --- 相机 ---
+    /** 切换第三人称移动时的相机朝向跟随。 */
+    setFollowPlayerDirection(enabled: boolean) { this.cam.followPlayerDirection = enabled; }
+    /** 设置人物朝向跟随响应速度；越大越快，0 暂停跟随。 */
+    setPlayerDirectionFollowSpeed(speed: number) {
+        assertDirectionFollowSpeed(speed);
+        this.cam.playerDirectionFollowSpeed = speed;
+    }
+    /** 切换相机管理；关闭时保留当前世界位姿并恢复应用的 Controls 配置。 */
+    setManageCamera(enabled: boolean) {
+        if (this.destroyed) return;
+        if (enabled === this._manageCamera) return;
+        if (!enabled) {
+            this.input.unbindLookEvents();
+            this.cam.resetControls();
+        }
+        this._manageCamera = enabled;
+        this.mobileControls?.setManageCamera(enabled);
+        if (enabled) {
+            this.cam.captureControls();
+            this.cam.initControls();
+            this.cam.setCamPos();
+            this.cam.setOverShoulder(this.enableOverShoulderView && !this.isFirstPerson);
+            this.cam.setPointerLock();
+            this.input.bindLookEvents();
+        }
+    }
     /** 切换视角模式。 */
     changeView() { this.cam.changeView(); }
     /** 设置第一人称。 */
@@ -982,14 +1080,46 @@ export class playerController {
     getCenterScreenRaycastHit() { return this.cam.getCenterHit(); }
 
     // --- 输入 ---
+    /** 切换键盘输入绑定；不影响鼠标视角、移动端控件或外部输入。 */
+    setBindKeyboardEvents(enabled: boolean) {
+        if (this.destroyed) return;
+        if (enabled === this._bindKeyboardEvents) return;
+        this._bindKeyboardEvents = enabled;
+        if (enabled) this.input.bindKeyboardEvents();
+        else this.input.unbindKeyboardEvents();
+    }
+    /** 切换内置视角输入；保留相机跟随、避障和外部视角输入。 */
+    setBindLookEvents(enabled: boolean) {
+        if (this.destroyed || enabled === this._bindLookEvents) return;
+        this._bindLookEvents = enabled;
+        if (enabled) this.input.bindLookEvents();
+        else this.input.unbindLookEvents();
+        this.mobileControls?.setBindLookEvents(enabled);
+        this.cam.syncInputEvents();
+    }
     /** 设置输入状态。 */
     setInput(input: Parameters<InputSystem["setInput"]>[0]) { this.input.setInput(input); }
     /** 运行时自定义键位。 */
     setKeyMap(map?: KeyMap) { this.input.buildKeyMap(map); }
     /** 绑定输入事件。 */
-    onAllEvent() { this.input.bindEvents(); }
+    onAllEvent() {
+        if (this.destroyed) return;
+        this.isupdate = true;
+        this.setBindKeyboardEvents(true);
+        this.setBindLookEvents(true);
+        this.syncMobileControls();
+        if (this.manageCamera && this.mobileControls) this.cam.initControls();
+        this.input.bindEvents();
+    }
     /** 解绑输入事件。 */
-    offAllEvent() { this.input.unbindEvents(); }
+    offAllEvent() {
+        this.setBindKeyboardEvents(false);
+        this.setBindLookEvents(false);
+        this.isupdate = false;
+        this.input.unbindEvents();
+        this.syncMobileControls();
+        this.cam.syncInputEvents();
+    }
 
     // --- 载具 ---
     /** 加载车辆模型。 */
@@ -1000,32 +1130,48 @@ export class playerController {
     // --- 销毁 ---
     /** 销毁控制器并释放资源。 */
     destroy() {
-        this.input.unbindEvents();
+        if (this.destroyed) return;
+        this.destroyed = true;
+        const errors: unknown[] = [];
+        /** 记录清理异常并继续释放其他资源，结束后重新抛出首个异常。 */
+        const cleanup = (action: () => void) => {
+            try { action(); } catch (error) { errors.push(error); }
+        };
+        this.isupdate = false;
+        cleanup(() => this.input.unbindEvents());
+        // 在移除骨骼和胶囊前归还可能挂在头部的相机。
+        cleanup(() => this.cam.resetControls());
+        this._manageCamera = false;
+        this._bindKeyboardEvents = false;
+        this._bindLookEvents = false;
 
         // 卸载插件
         for (const plugin of this.plugins.slice()) {
-            this.unuse(plugin);
-            plugin.dispose?.();
+            cleanup(() => this.unuse(plugin));
+            cleanup(() => plugin.dispose?.());
         }
         this.plugins = [];
 
-        this.playerDebug.dispose();
+        cleanup(() => this.playerDebug.dispose());
 
         // 清除玩家对象
-        if (this.playerCapsule) { this.playerCapsule.remove(this.camera); this.scene.remove(this.playerCapsule); }
+        const capsule = this.playerCapsule;
+        if (capsule) cleanup(() => this.scene.remove(capsule));
         (this.playerCapsule as any) = null;
-        if (this.playerModel) { this.scene.remove(this.playerModel); this.playerModel = null; }
+        const model = this.playerModel;
+        if (model) cleanup(() => this.scene.remove(model));
+        this.playerModel = null;
 
         // 清除碰撞体和相机
-        this.cam.resetControls();
-        this.clearColliders();
-        this.mobileControls?.destroy();
+        cleanup(() => this.clearColliders());
+        cleanup(() => this.mobileControls?.destroy());
         this.mobileControls = null;
-        this.bvhWorkerPool.dispose();
+        cleanup(() => this.bvhWorkerPool.dispose());
 
         // 清除所有车辆
-        this.vehicle.destroy();
-        this.dynamics.clear();
-        this.collisionWorld.clear();
+        cleanup(() => this.vehicle.destroy());
+        cleanup(() => this.dynamics.clear());
+        cleanup(() => this.collisionWorld.clear());
+        if (errors.length) throw errors[0];
     }
 }

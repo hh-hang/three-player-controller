@@ -41,6 +41,7 @@ export class VehicleSystem {
             rollInfluence: DEFAULT_WHEEL_PHYSICS.rollInfluence,
         },
         followVehicleDirection: true, // 相机跟随方向
+        vehicleDirectionFollowSpeed: 3, // 朝向跟随响应速度，越大越快
     };
 
     boardingPadding = 0.25; // 上车/下车余量基准值（按车辆 scale 缩放）

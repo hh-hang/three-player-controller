@@ -170,11 +170,11 @@ export class DynamicBodySystem {
     /** 添加动态球。 */
     addSphere(desc: DynamicColliderDesc): DynamicSphereBody {
         if (desc.shape.kind !== "sphere") {
-            throw new Error("[DynamicBodySystem] addSphere 需要 shape.kind === \"sphere\"");
+            throw new Error("[DynamicBodySystem] addSphere 要求 shape.kind 为 \"sphere\"。");
         }
         const mesh = desc.mesh;
         if (!mesh) {
-            throw new Error("[DynamicBodySystem] addSphere 需要 mesh");
+            throw new Error("[DynamicBodySystem] addSphere 必须提供 mesh。");
         }
 
         const radius = Math.max(1e-4, desc.shape.radius);
@@ -227,11 +227,11 @@ export class DynamicBodySystem {
     /** 添加动态盒。 */
     addBox(desc: DynamicColliderDesc): DynamicBoxBody {
         if (desc.shape.kind !== "box") {
-            throw new Error("[DynamicBodySystem] addBox 需要 shape.kind === \"box\"");
+            throw new Error("[DynamicBodySystem] addBox 要求 shape.kind 为 \"box\"。");
         }
         const mesh = desc.mesh;
         if (!mesh) {
-            throw new Error("[DynamicBodySystem] addBox 需要 mesh");
+            throw new Error("[DynamicBodySystem] addBox 必须提供 mesh。");
         }
 
         const half = desc.shape.halfExtents.clone();

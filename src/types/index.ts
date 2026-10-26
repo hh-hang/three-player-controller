@@ -140,6 +140,19 @@ export type KeyAction =
 /** 自定义键位映射；未填使用默认键，传入 code 或数组覆盖，传入 null 禁用。 */
 export type KeyMap = Partial<Record<KeyAction, string | string[] | null>>;
 
+/** 外部输入状态；移动轴范围为 -1 到 1，切换动作只在 true 时触发。 */
+export type PlayerInput = Partial<{
+    moveX: number;
+    moveY: number;
+    lookDeltaX: number;
+    lookDeltaY: number;
+    jump: boolean;
+    shift: boolean;
+    toggleView: boolean;
+    toggleFly: boolean;
+    toggleVehicle: boolean;
+}>;
+
 /** 玩家控制器初始化配置。 */
 export type PlayerControllerOptions = {
     /** three.js 场景实例。 */
@@ -148,6 +161,12 @@ export type PlayerControllerOptions = {
     camera: THREE.PerspectiveCamera;
     /** 外部相机控制器，通常为 OrbitControls。 */
     controls: any;
+    /** 是否接管相机与外部 Controls，默认 true；false 时由应用更新相机。 */
+    manageCamera?: boolean;
+    /** 是否绑定键盘输入，默认 true；不影响鼠标视角、滚轮、移动端控件或 setInput。 */
+    bindKeyboardEvents?: boolean;
+    /** 是否绑定内置鼠标、滚轮和移动端视角手势，默认 true；不影响相机跟随、避障或 setInput。 */
+    bindLookEvents?: boolean;
     /** 角色模型与参数配置。 */
     playerModelConfig: PlayerModelOptions;
     /** 初始出生点，默认 (0, 0, 0)。 */
@@ -180,6 +199,10 @@ export type PlayerControllerOptions = {
     enableSpringCamera?: boolean;
     /** 弹簧相机平滑时间，单位为秒，默认 0.05。 */
     springCameraTime?: number;
+    /** 第三人称移动时相机是否跟随人物朝向，默认 false。 */
+    followPlayerDirection?: boolean;
+    /** 人物朝向跟随响应速度，单位为 1/秒，默认 3；越大越快，0 暂停跟随。 */
+    playerDirectionFollowSpeed?: number;
     /** 时间缩放系数；小于 1 为慢动作，大于 1 为快进，默认 1。 */
     timeScale?: number;
     /**
@@ -318,6 +341,8 @@ export type VehicleOptions = VehicleModelSource & {
     modelRotation?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
+    /** 车辆朝向跟随响应速度，单位为 1/秒，默认 3；越大越快，0 暂停跟随。 */
+    vehicleDirectionFollowSpeed?: number;
     /** 调试显示。 */
     debug?: {
         /** 是否显示底盘物理盒，默认 false。 */
@@ -408,6 +433,8 @@ export type VehicleInstance = {
     deceleration: number;
     /** 相机是否跟随车辆方向。 */
     followVehicleDirection: boolean;
+    /** 车辆朝向跟随响应速度，单位为 1/秒。 */
+    vehicleDirectionFollowSpeed: number;
     /** 物理盒体调试网格。 */
     physicsBoxMesh?: THREE.Mesh;
     /** 车轮射线调试。 */
