@@ -1,9 +1,10 @@
 import { resolve } from "path";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
 const example = resolve(__dirname, "example");
 
 export default defineConfig(({ mode }) => {
+    const base = loadEnv(mode, __dirname, "VITE_").VITE_BASE_URL || "/";
     const tiles = mode === "tiles";
     const input: Record<string, string> = tiles
         ? { tiles: resolve(example, "3dtilesScene.html") }
@@ -16,7 +17,8 @@ export default defineConfig(({ mode }) => {
             showcase: resolve(example, "showcase.html"),
         };
     return {
-        base: "/three-player-controller/",
+        base,
+        envDir: __dirname,
         root: example,
         server: { host: true, port: tiles ? 5174 : 5173 },
         ...(tiles

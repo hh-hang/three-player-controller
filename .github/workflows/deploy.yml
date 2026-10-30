@@ -32,6 +32,8 @@ jobs:
 
       - name: Build examples
         run: npm run build:example
+        env:
+          VITE_BASE_URL: /three-player-controller/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -51,7 +51,7 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173/three-player-controller/`。
+浏览器访问 `http://localhost:5173/`。
 
 # 快速开始
 

@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/three-player-controller/`.
+Open `http://localhost:5173/`.
 
 - Library code: `src/`
 - Demos: `example/`
